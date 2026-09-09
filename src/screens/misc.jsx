@@ -1,0 +1,367 @@
+import { useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import Icon from '../ui/Icon.jsx'
+import { StatusBar, PlainHeader, TopBar, Avatar, Segmented, IconBadge, ResultScreen, SectionTitle } from '../ui/kit.jsx'
+import { AppLayout, ImmersiveLayout, CenterLayout } from '../ui/layouts.jsx'
+import { notifications, reportReasons, gifts } from '../data.js'
+
+/* 44 — Notifications */
+export function Notifications() {
+  const [f, setF] = useState('All')
+  return (
+    <AppLayout tab="/notifications" title="Notifications" back bottomNav={false} maxW="lg" bg="canvas">
+      <TopBar title="Notifications" sub="4 new" />
+      <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-6">
+        <Segmented options={['All', 'Money', 'Calls', 'System']} value={f} onChange={setF} />
+        {notifications.map((g) => (
+          <div key={g.group}>
+            <SectionTitle className="mt-5 mb-1">{g.group}</SectionTitle>
+            <div className="card px-4 divide-y divide-black/5">
+              {g.items.map((it, i) => (
+                <div key={i} className="flex items-center gap-3 py-3">
+                  {it.avatar ? <Avatar name={it.avatar} size={40} /> : <IconBadge name={it.icon} tone={it.tone} />}
+                  <div className="flex-1 min-w-0"><p className="text-[14px] font-semibold text-ink-900">{it.title}</p>{it.sub && <p className="text-[12px] text-ink-400 truncate">{it.sub}</p>}</div>
+                  <div className="text-right shrink-0">
+                    <p className="text-[11px] text-ink-300">{it.time}</p>
+                    {it.tag && <span className={`pill text-[10px] mt-1 ${it.tagTone === 'rose' ? 'bg-rose-50 text-rose-500' : 'bg-brand-50 text-brand-600'}`}>{it.tag}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </AppLayout>
+  )
+}
+
+/* 45 — Report user */
+export function ReportUser() {
+  const nav = useNavigate()
+  const [sel, setSel] = useState(reportReasons[0])
+  return (
+    <AppLayout tab="/calls" title="Report user" back bottomNav={false} maxW="md" bg="white">
+      <TopBar title="Report user" />
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
+        <div className="flex items-center gap-3">
+          <Avatar name="Rahul" size={44} />
+          <div><p className="text-[15px] font-semibold text-ink-900">Rahul</p><p className="text-[12px] text-ink-400">Video call · today, 9:12 PM</p></div>
+        </div>
+        <SectionTitle className="mt-5 mb-2">What happened?</SectionTitle>
+        <div className="card divide-y divide-black/5">
+          {reportReasons.map((r) => (
+            <button key={r} onClick={() => setSel(r)} className="w-full flex items-center gap-3 px-4 py-3.5 text-left">
+              <span className={`h-5 w-5 rounded-full border-2 grid place-items-center ${sel === r ? 'border-brand-600 bg-brand-600' : 'border-black/20'}`}>{sel === r && <Icon name="check" size={12} className="text-white" />}</span>
+              <span className="text-[14px] text-ink-900">{r}</span>
+            </button>
+          ))}
+        </div>
+        <textarea rows={2} placeholder="Add details (optional)" className="input mt-3" />
+        <div className="mt-3 flex items-start gap-2 rounded-xl bg-brand-50 px-3 py-2.5 text-[12px] text-brand-700">
+          <Icon name="shield" size={14} className="mt-0.5 shrink-0" /> Reports are confidential. The user is never told who reported them.
+        </div>
+        <button onClick={() => nav('/report/submitted')} className="btn-danger-outline mt-4"><Icon name="flag" size={16} /> Submit report</button>
+      </div>
+    </AppLayout>
+  )
+}
+
+/* 47 — Report submitted */
+export function ReportSubmitted() {
+  const nav = useNavigate()
+  return (
+    <AppLayout tab="/calls" title="Report" back bottomNav={false} maxW="md" bg="white">
+      <div className="py-8">
+        <ResultScreen tone="green" icon="check" title="Report submitted" desc="Reference SR-4471 · 25 Aug, 9:20 PM">
+          <div className="card p-4 text-left space-y-3">
+            {[['shield', 'Our safety team reviews within 24 hours'], ['ban', 'Rahul has been blocked automatically'], ['bell', "We'll notify you of the outcome"]].map(([i, t]) => (
+              <div key={t} className="flex items-center gap-3"><span className="grid place-items-center h-8 w-8 rounded-lg bg-brand-50 text-brand-600"><Icon name={i} size={15} /></span><span className="text-[13px] text-ink-700">{t}</span></div>
+            ))}
+          </div>
+          <div className="rounded-xl bg-emerald-50 px-3 py-2.5 text-[12px] text-emerald-700 flex items-center gap-2"><Icon name="check" size={14} /> Thanks for helping keep the community safe.</div>
+          <button onClick={() => nav('/home')} className="btn-primary">Back to home</button>
+        </ResultScreen>
+      </div>
+    </AppLayout>
+  )
+}
+
+/* 46 — Block user */
+export function BlockUser() {
+  const nav = useNavigate()
+  const { name = 'Rahul' } = useParams()
+  return (
+    <AppLayout tab="/chat" title={name} back bottomNav={false} maxW="md" bg="canvas">
+      <div className="fixed inset-0 z-[70] flex flex-col justify-end lg:justify-center lg:items-center" onClick={() => nav(-1)}>
+        <div className="absolute inset-0 bg-black/40" />
+        <div className="relative bg-white rounded-t-3xl lg:rounded-2xl lg:max-w-sm w-full p-5 animate-sheet-up" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-start gap-3">
+            <span className="grid place-items-center h-11 w-11 rounded-full bg-rose-50 text-rose-500 shrink-0"><Icon name="ban" size={18} /></span>
+            <div><p className="text-[17px] font-bold text-ink-900">Block {name}?</p><p className="text-[13px] text-ink-400 mt-0.5">They won't be able to call or message you, and your profile is hidden from them. You can unblock any time from Settings.</p></div>
+          </div>
+          <div className="mt-3 flex items-center gap-2 rounded-xl bg-gold-50 px-3 py-2.5 text-[12px] text-gold-600"><Icon name="alert" size={14} /> Blocking also ends any active call with this user.</div>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <button onClick={() => nav(-1)} className="btn-outline">Cancel</button>
+            <button onClick={() => nav('/blocked/Aanya')} className="btn-danger-outline"><Icon name="ban" size={16} /> Block</button>
+          </div>
+        </div>
+      </div>
+    </AppLayout>
+  )
+}
+
+/* 58 — Blocked confirmation */
+export function Blocked() {
+  const nav = useNavigate()
+  const { name = 'Aanya' } = useParams()
+  return (
+    <AppLayout tab="/chat" title="Blocked" back bottomNav={false} maxW="md" bg="white">
+      <div className="py-8">
+        <ResultScreen tone="green" icon="check" title={`${name} is blocked`} desc="They can no longer contact you">
+          <div className="rounded-xl bg-brand-50 px-3 py-2.5 text-[12px] text-brand-700 flex items-center gap-2"><Icon name="shield" size={14} /> Manage this anytime from Profile → Blocked creators.</div>
+          <button onClick={() => nav('/home')} className="btn-primary">Back to home</button>
+        </ResultScreen>
+      </div>
+    </AppLayout>
+  )
+}
+
+/* 48 — Ask for a gift */
+export function AskGift() {
+  const nav = useNavigate()
+  const { ctx } = useParams()
+  const isLive = ctx === 'live'
+  const [pick, setPick] = useState('crown')
+  return (
+    <ImmersiveLayout>
+      <div className="mx-auto flex min-h-[100dvh] max-w-[520px] flex-col text-white bg-gradient-to-b from-night-700 via-night-800 to-night-900">
+        <StatusBar dark />
+        <div className="px-4">
+          {isLive ? (
+            <div className="flex items-center gap-2">
+              <span className="pill bg-black/40 text-white text-[12px]"><Avatar name="Ayesha" size={20} /> Ayesha <span className="text-rose-400 font-bold">● LIVE</span></span>
+              <span className="pill bg-black/40 text-white text-[12px]"><Icon name="eye" size={12} /> 1,204</span>
+              <span className="ml-auto pill bg-black/40 text-gold-300 text-[12px] font-bold">8,420</span>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-white/8 px-3.5 py-2.5 flex items-center gap-3 border border-white/10">
+              <Avatar name="Rahul" size={34} /><span className="flex-1 text-[15px] font-semibold">Rahul</span><span className="text-[12px] text-white/60">08:12</span>
+            </div>
+          )}
+        </div>
+        <div className="flex-1 grid place-items-center"><div className="h-52 w-52 rounded-full bg-white/5" /></div>
+        <div className="bg-white rounded-t-3xl p-5 text-ink-900 animate-sheet-up">
+          <h3 className="text-[17px] font-bold">Ask for a gift</h3>
+          <div className="grid grid-cols-3 gap-3 mt-3">
+            {gifts.map((g) => (
+              <button key={g.key} onClick={() => setPick(g.key)} className={`rounded-2xl border py-3 flex flex-col items-center gap-1 ${pick === g.key ? 'border-gold-400 bg-gold-50' : 'border-black/10'}`}>
+                <span className="text-2xl">{g.emoji}</span>
+                <span className="text-[13px] font-semibold">{g.label}</span>
+                <span className="text-[12px] font-bold text-gold-500">{g.beans.toLocaleString()}</span>
+              </button>
+            ))}
+          </div>
+          <input placeholder="Add a sweet note…" className="input mt-3" />
+          <button onClick={() => nav('/gift/received')} className="btn-gold mt-3"><Icon name="gift" size={16} /> Send request</button>
+        </div>
+      </div>
+    </ImmersiveLayout>
+  )
+}
+
+/* 49 — Gift received */
+export function GiftReceived() {
+  const nav = useNavigate()
+  return (
+    <ImmersiveLayout>
+      <div className="mx-auto flex min-h-[100dvh] max-w-[520px] flex-col text-white bg-gradient-to-b from-night-800 to-night-900">
+        <StatusBar dark />
+        <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+          <span className="grid place-items-center h-40 w-40 rounded-full bg-white/5 animate-slide-up">
+            <span className="grid place-items-center h-24 w-24 rounded-full bg-gold-400 text-white text-4xl">👑</span>
+          </span>
+          <h2 className="mt-6 text-[22px] font-extrabold">Neel sent a Crown!</h2>
+          <p className="text-[28px] font-extrabold text-gold-300 mt-1">+2,100 beans</p>
+          <p className="text-[13px] text-white/60 mt-1">≈ ₹ 1,050 added to your balance</p>
+        </div>
+        <div className="px-4 pb-8 space-y-2">
+          {[['Aman sent Rocket', '+1,050 beans', '🚀'], ['Karan sent Heart', '+120 beans', '❤️']].map(([t, s, e]) => (
+            <div key={t} className="rounded-2xl bg-white/8 border border-white/10 px-3.5 py-3 flex items-center gap-3">
+              <span className="text-xl">{e}</span>
+              <div className="flex-1"><p className="text-[14px] font-semibold">{t}</p><p className="text-[12px] text-gold-300">{s}</p></div>
+              <Avatar name={t} size={30} />
+            </div>
+          ))}
+          <button onClick={() => nav(-1)} className="btn bg-white/10 text-white mt-1"><Icon name="heart" size={16} /> Say thanks</button>
+        </div>
+      </div>
+    </ImmersiveLayout>
+  )
+}
+
+/* ---------------- system states ---------------- */
+
+/* 50 — Loading */
+export function LoadingState() {
+  return (
+    <AppLayout tab="/earnings" title="Earnings" maxW="xl" bg="canvas">
+      <PlainHeader title="Earnings" sub="Loading…" />
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4 space-y-4 animate-pulse">
+        <div className="h-40 rounded-2xl bg-black/[.06]" />
+        <div className="grid grid-cols-3 gap-3">{[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-2xl bg-black/[.06]" />)}</div>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div key={i} className="flex items-center gap-3"><div className="h-10 w-10 rounded-full bg-black/[.06]" /><div className="flex-1 space-y-1.5"><div className="h-3 w-2/3 rounded bg-black/[.06]" /><div className="h-3 w-1/3 rounded bg-black/[.06]" /></div><div className="h-3 w-10 rounded bg-black/[.06]" /></div>
+        ))}
+      </div>
+    </AppLayout>
+  )
+}
+
+/* 51 — No calls */
+export function NoCalls() {
+  const nav = useNavigate()
+  return (
+    <AppLayout tab="/calls" title="Calls" maxW="md" bg="white">
+      <PlainHeader title="Calls" />
+      <div className="flex flex-col items-center px-6 pt-12 lg:pt-6 text-center">
+        <span className="grid place-items-center h-28 w-28 rounded-[28px] bg-gradient-to-br from-brand-50 to-gold-50 text-brand-500"><Icon name="inbox" size={44} /></span>
+        <h2 className="mt-5 text-[22px] font-extrabold text-ink-900">No calls yet</h2>
+        <p className="mt-1.5 text-[13px] text-ink-400">Your first call is usually within 20 minutes of going online.</p>
+        <div className="card w-full max-w-sm mt-5 p-4 text-left">
+          <p className="text-[13px] font-bold text-ink-900 text-center mb-2">Get your first call faster</p>
+          {['Add 3 photos to your gallery', 'Go online between 8–11 PM', 'Set a friendly bio'].map((t) => (
+            <p key={t} className="flex items-center gap-2 text-[13px] text-ink-700 py-1"><Icon name="check" size={14} className="text-emerald-500" /> {t}</p>
+          ))}
+        </div>
+        <button onClick={() => nav('/home?state=online')} className="btn-primary mt-4 max-w-sm"><Icon name="phone" size={16} /> Go online now</button>
+      </div>
+    </AppLayout>
+  )
+}
+
+/* 52 — Something went wrong */
+export function SomethingWrong() {
+  return (
+    <AppLayout tab="/earnings" title="Earnings" maxW="md" bg="white">
+      <PlainHeader title="Earnings" />
+      <div className="flex flex-col items-center px-6 pt-12 lg:pt-6 text-center">
+        <span className="grid place-items-center h-28 w-28 rounded-full bg-rose-50 text-rose-500 border-2 border-dashed border-rose-200"><Icon name="alert" size={40} /></span>
+        <h2 className="mt-5 text-[22px] font-extrabold text-ink-900">Something went wrong</h2>
+        <p className="mt-1.5 text-[13px] text-ink-400">We couldn't load your earnings right now.</p>
+        <div className="w-full max-w-sm mt-4 rounded-xl bg-rose-50 px-3 py-2.5 text-[12px] text-rose-500 flex items-center gap-2 justify-center"><Icon name="alert" size={14} /> Error code E-5031 · our team has been notified.</div>
+        <button className="btn-primary mt-4 max-w-sm"><Icon name="refresh" size={16} /> Try again</button>
+        <button className="btn-outline mt-3 max-w-sm"><Icon name="help" size={16} /> Contact support</button>
+      </div>
+    </AppLayout>
+  )
+}
+
+function DarkState({ icon, title, desc, children }) {
+  return (
+    <ImmersiveLayout>
+      <div className="mx-auto flex min-h-[100dvh] max-w-[480px] flex-col text-white bg-gradient-to-b from-night-800 to-night-900">
+        <StatusBar dark />
+        <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+          <span className="grid place-items-center h-28 w-28 rounded-[28px] bg-white/10 text-white/80"><Icon name={icon} size={44} /></span>
+          <h2 className="mt-5 text-[22px] font-extrabold">{title}</h2>
+          <p className="mt-1.5 text-[14px] text-white/60 max-w-[18rem]">{desc}</p>
+          <div className="w-full max-w-xs mt-5 space-y-3">{children}</div>
+        </div>
+      </div>
+    </ImmersiveLayout>
+  )
+}
+
+function LightState({ icon, iconWrap = 'bg-gradient-to-br from-brand-50 to-gold-50 text-brand-500', title, desc, children }) {
+  return (
+    <CenterLayout>
+      <StatusBar />
+      <div className="flex-1 flex flex-col items-center justify-center px-6 py-16 text-center">
+        <span className={`grid place-items-center h-28 w-28 rounded-[28px] ${iconWrap}`}><Icon name={icon} size={44} /></span>
+        <h2 className="mt-5 text-[22px] font-extrabold text-ink-900">{title}</h2>
+        <p className="mt-1.5 text-[14px] text-ink-400 max-w-[18rem]">{desc}</p>
+        <div className="w-full max-w-xs mt-5 space-y-3">{children}</div>
+      </div>
+    </CenterLayout>
+  )
+}
+
+/* 54 — Offline */
+export function OfflineState() {
+  return (
+    <LightState icon="cloud-off" title="You're offline" desc="Check your mobile data or Wi-Fi and try again.">
+      <div className="card p-3.5 flex items-center gap-3 text-left">
+        <span className="grid place-items-center h-10 w-10 rounded-xl bg-black/5 text-ink-400 shrink-0"><Icon name="wifi-off" size={17} /></span>
+        <span className="text-[13px] text-ink-500">Calls and live streams are paused while offline.</span>
+      </div>
+      <button className="btn-primary"><Icon name="refresh" size={16} /> Retry connection</button>
+    </LightState>
+  )
+}
+
+/* 55 — Reconnecting */
+export function Reconnecting() {
+  const nav = useNavigate()
+  return (
+    <ImmersiveLayout>
+      <div className="mx-auto flex min-h-[100dvh] max-w-[520px] flex-col text-white bg-gradient-to-b from-night-700 via-night-800 to-night-900">
+        <StatusBar dark />
+        <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+          <div className="relative grid place-items-center">
+            <span className="absolute h-48 w-48 rounded-full border border-white/15" />
+            <span className="grid place-items-center h-28 w-28 rounded-full bg-brand-500/40"><Icon name="refresh" size={34} className="animate-spinslow" /></span>
+          </div>
+          <h2 className="mt-6 text-[22px] font-extrabold">Reconnecting…</h2>
+          <p className="text-[14px] text-white/60 mt-1">Hang tight, we're restoring the call</p>
+          <span className="pill bg-black/40 text-white text-[13px] mt-4 font-semibold">Billing paused · 00:09</span>
+        </div>
+        <div className="p-4 pb-8"><button onClick={() => nav('/calls')} className="btn bg-rose-500 text-white"><Icon name="phone-off" size={16} /> End call</button></div>
+      </div>
+    </ImmersiveLayout>
+  )
+}
+
+/* 56 — Session expired */
+export function SessionExpired() {
+  const nav = useNavigate()
+  return (
+    <LightState icon="lock" iconWrap="bg-gradient-to-br from-brand-50 to-gold-50 text-brand-500" title="Session expired" desc="For your security we signed you out after inactivity.">
+      <div className="card p-3.5 flex items-center gap-3 text-left">
+        <span className="grid place-items-center h-10 w-10 rounded-xl bg-black/5 text-ink-400 shrink-0"><Icon name="clock" size={17} /></span>
+        <span className="text-[13px] text-ink-500">Your earnings and messages are safe. Just sign in again.</span>
+      </div>
+      <button onClick={() => nav('/login')} className="btn-primary"><Icon name="chevron-right" size={16} /> Log in again</button>
+      <button className="text-[13px] font-semibold text-brand-600 flex items-center gap-1.5 justify-center w-full"><Icon name="help" size={15} /> Need help?</button>
+    </LightState>
+  )
+}
+
+/* 57 — Account suspended */
+export function AccountSuspended() {
+  return (
+    <CenterLayout>
+      <StatusBar />
+      <div className="flex-1 flex flex-col items-center justify-center px-6 py-16 text-center">
+        <span className="grid place-items-center h-28 w-28 rounded-full bg-ink-700 text-white"><Icon name="user-x" size={44} /></span>
+        <h2 className="mt-5 text-[22px] font-extrabold text-ink-900">Account suspended</h2>
+        <p className="mt-1.5 text-[13px] text-ink-400 max-w-[18rem]">Suspended on 22 Aug for a community guidelines violation.</p>
+        <div className="w-full max-w-sm mt-5 rounded-2xl p-4 text-left bg-black/[.03]">
+          <p className="text-[13px] font-bold text-ink-900">Access removed</p>
+          <p className="text-[12px] text-ink-400 mt-1">Calls, live streams and withdrawals are disabled. There is no login option while a suspension is active.</p>
+        </div>
+        <button className="btn-dark mt-4 max-w-sm"><Icon name="help" size={16} /> Appeal to support</button>
+      </div>
+    </CenterLayout>
+  )
+}
+
+/* screenshot blocked */
+export function ScreenshotBlocked() {
+  const nav = useNavigate()
+  return (
+    <DarkState icon="camera-off" title="Screenshot blocked" desc="Recording and screenshots are disabled during calls and live streams to protect both sides.">
+      <span className="mx-auto pill bg-white/10 text-white text-[12px]"><Icon name="shield" size={13} /> This attempt was logged</span>
+      <button onClick={() => nav(-1)} className="btn bg-white/12 text-white">Got it</button>
+    </DarkState>
+  )
+}

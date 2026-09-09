@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+body {
+  background: #0f0a1f;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  min-width: 0;
+}
+
+/* hide scrollbars inside the phone */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@layer components {
+  .screen {
+    @apply min-h-full w-full flex flex-col;
+  }
+  .card {
+    @apply rounded-2xl bg-white shadow-card border border-black/5;
+  }
+  .btn {
+    @apply w-full rounded-2xl py-3.5 px-4 font-semibold text-[15px] flex items-center justify-center gap-2 transition active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 text-white shadow-[0_8px_24px_-6px_rgba(91,46,229,.5)];
+  }
+  .btn-dark {
+    @apply btn bg-ink-900 text-white;
+  }
+  .btn-outline {
+    @apply btn bg-white border border-black/10 text-ink-900;
+  }
+  .btn-gold {
+    @apply btn bg-gold-400 text-ink-900;
+  }
+  .btn-danger-outline {
+    @apply btn bg-white border border-rose-500/40 text-rose-500;
+  }
+  .input {
+    @apply w-full rounded-xl border border-black/10 bg-white px-3.5 py-3 text-[15px] text-ink-900 placeholder:text-ink-300 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 transition;
+  }
+  .label {
+    @apply text-[13px] font-semibold text-ink-500 mb-1.5 block;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-[13px] font-medium;
+  }
+  .section-title {
+    @apply text-[12px] font-semibold tracking-wide text-ink-400 uppercase;
+  }
+  .stat-card {
+    @apply card p-3.5 flex flex-col gap-1;
+  }
+}
