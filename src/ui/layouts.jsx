@@ -63,9 +63,11 @@ export function CenterLayout({ children }) {
  */
 export function ImmersiveLayout({ children }) {
   return (
-    <div className="relative min-h-[100dvh] w-full overflow-hidden bg-[#0f0a1f]">
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-brand-700/25 blur-[120px]" />
-      <div className="pointer-events-none absolute bottom-0 right-1/4 h-[40vh] w-[40vh] rounded-full bg-gold-500/10 blur-[120px]" />
+    <div className="relative min-h-[100dvh] w-full overflow-x-clip bg-[#0f0a1f]">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute left-1/2 top-0 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-brand-700/25 blur-[120px]" />
+        <div className="absolute bottom-0 right-1/4 h-[40vh] w-[40vh] rounded-full bg-gold-500/10 blur-[120px]" />
+      </div>
       <div className="relative">{children}</div>
     </div>
   )

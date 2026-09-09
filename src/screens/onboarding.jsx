@@ -7,19 +7,34 @@ import { CenterLayout, ImmersiveLayout, AppLayout } from '../ui/layouts.jsx'
 /* 1 — Splash */
 export function Splash() {
   const nav = useNavigate()
-  useEffect(() => { const t = setTimeout(() => nav('/login'), 1600); return () => clearTimeout(t) }, [nav])
+  useEffect(() => { const t = setTimeout(() => nav('/login'), 2000); return () => clearTimeout(t) }, [nav])
   return (
     <ImmersiveLayout>
-      <div className="relative flex min-h-full flex-col overflow-hidden bg-gradient-to-b from-brand-800 via-night-800 to-night-900 text-white">
-        <div className="absolute -top-24 -left-16 h-64 w-64 rounded-full bg-brand-500/40 blur-3xl" />
-        <div className="absolute bottom-10 right-0 h-56 w-56 rounded-full bg-gold-400/20 blur-3xl" />
+      <div
+        className="relative flex min-h-[100dvh] flex-col items-center overflow-hidden text-white bg-gradient-to-br from-brand-800 via-night-800 to-night-900 bg-[length:180%_180%] animate-bg-pan"
+      >
+        <div className="pointer-events-none absolute -top-24 -left-16 h-64 w-64 rounded-full bg-brand-500/40 blur-3xl animate-glow-breathe" />
+        <div className="pointer-events-none absolute bottom-10 right-0 h-56 w-56 rounded-full bg-gold-400/20 blur-3xl animate-glow-breathe" style={{ animationDelay: '1.3s' }} />
         <StatusBar dark />
-        <div className="flex-1 flex flex-col items-center justify-center gap-4">
-          <div className="h-24 w-24 rounded-[26px] bg-gradient-to-br from-brand-400 to-brand-600 shadow-[0_20px_60px_-10px_rgba(109,59,230,.7)]" />
-          <h1 className="text-[30px] font-extrabold tracking-tight">Splash</h1>
+
+        <div className="flex-1 flex flex-col items-center justify-center gap-5">
+          <div className="relative animate-logo-float">
+            {/* halo */}
+            <span className="pointer-events-none absolute -inset-6 rounded-[40px] bg-brand-400/30 blur-2xl animate-glow-breathe" />
+            {/* pulsing rings */}
+            <span className="pointer-events-none absolute inset-0 rounded-[26px] ring-1 ring-white/20 animate-pulse-ring" />
+            <div className="relative h-24 w-24 rounded-[26px] bg-gradient-to-br from-brand-300 via-brand-500 to-brand-700 shadow-[0_20px_60px_-10px_rgba(109,59,230,.8)] animate-logo-in grid place-items-center">
+              <Icon name="heart" size={34} className="text-white/90" fill="currentColor" />
+            </div>
+          </div>
+          <h1 className="text-[30px] font-extrabold animate-word-in">Splash</h1>
         </div>
-        <div className="pb-8 flex justify-center">
-          <div className="h-1 w-24 rounded-full bg-white/15 overflow-hidden"><div className="h-full w-1/2 bg-gold-400 animate-pulse" /></div>
+
+        <div className="pb-10 flex flex-col items-center gap-2 animate-fade-in" style={{ animationDelay: '.6s' }}>
+          <div className="h-1 w-28 rounded-full bg-white/15 overflow-hidden">
+            <div className="h-full rounded-full bg-gradient-to-r from-gold-300 to-gold-400 animate-loadbar" />
+          </div>
+          <span className="text-[11px] text-white/40">Loading your studio…</span>
         </div>
       </div>
     </ImmersiveLayout>
@@ -250,6 +265,7 @@ export function PayoutAccount({ standalone }) {
 
 /* 8 — Under review */
 export function UnderReview() {
+  const nav = useNavigate()
   const rows = [
     { t: 'Documents received', done: true }, { t: 'Identity check', done: true }, { t: 'Final approval', done: false },
   ]
@@ -269,6 +285,7 @@ export function UnderReview() {
           ))}
         </div>
         <div className="mt-4 flex items-center gap-2 rounded-xl bg-black/[.04] px-3 py-2.5 text-[12px] text-ink-400"><Icon name="bell" size={14} /> We'll notify you the moment a decision is made.</div>
+        <button onClick={() => nav('/home')} className="btn-primary w-full max-w-sm mt-6">Go to dashboard</button>
       </div>
     </CenterLayout>
   )

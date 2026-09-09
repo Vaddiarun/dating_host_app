@@ -149,20 +149,21 @@ export function AskGift() {
             </div>
           )}
         </div>
-        <div className="flex-1 grid place-items-center"><div className="h-52 w-52 rounded-full bg-white/5" /></div>
-        <div className="bg-white rounded-t-3xl p-5 text-ink-900 animate-sheet-up">
+        <div className="flex-1 min-h-[64px] grid place-items-center"><div className="h-40 w-40 sm:h-52 sm:w-52 rounded-full bg-white/5" /></div>
+        <div className="bg-white rounded-t-3xl p-5 pt-4 text-ink-900 animate-sheet-up max-h-[80dvh] overflow-y-auto no-scrollbar">
+          <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-black/15" />
           <h3 className="text-[17px] font-bold">Ask for a gift</h3>
-          <div className="grid grid-cols-3 gap-3 mt-3">
+          <div className="grid grid-cols-3 gap-2.5 mt-2.5">
             {gifts.map((g) => (
-              <button key={g.key} onClick={() => setPick(g.key)} className={`rounded-2xl border py-3 flex flex-col items-center gap-1 ${pick === g.key ? 'border-gold-400 bg-gold-50' : 'border-black/10'}`}>
-                <span className="text-2xl">{g.emoji}</span>
+              <button key={g.key} onClick={() => setPick(g.key)} className={`rounded-2xl border py-2.5 flex flex-col items-center gap-0.5 ${pick === g.key ? 'border-gold-400 bg-gold-50' : 'border-black/10'}`}>
+                <span className="text-xl">{g.emoji}</span>
                 <span className="text-[13px] font-semibold">{g.label}</span>
                 <span className="text-[12px] font-bold text-gold-500">{g.beans.toLocaleString()}</span>
               </button>
             ))}
           </div>
-          <input placeholder="Add a sweet note…" className="input mt-3" />
-          <button onClick={() => nav('/gift/received')} className="btn-gold mt-3"><Icon name="gift" size={16} /> Send request</button>
+          <input placeholder="Add a sweet note…" className="input mt-2.5" />
+          <button onClick={() => nav('/gift/received')} className="btn-gold mt-2.5"><Icon name="gift" size={16} /> Send request</button>
         </div>
       </div>
     </ImmersiveLayout>
