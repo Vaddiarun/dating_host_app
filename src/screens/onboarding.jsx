@@ -1,13 +1,23 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
-import { StatusBar, TopBar, PlainHeader, IconBadge, ResultScreen, SectionTitle } from '../ui/kit.jsx'
+import { StatusBar, TopBar, PlainHeader, IconBadge, ResultScreen, SectionTitle, ErrorCard } from '../ui/kit.jsx'
 import { CenterLayout, ImmersiveLayout, AppLayout } from '../ui/layouts.jsx'
+import { useAuth, resolveEntryRoute } from '../state/AuthContext.jsx'
+import { profile as profileApi } from '../api/index.js'
+import { errorMessage } from '../lib/errors.js'
 
 /* 1 — Splash */
 export function Splash() {
   const nav = useNavigate()
-  useEffect(() => { const t = setTimeout(() => nav('/login'), 2000); return () => clearTimeout(t) }, [nav])
+  const { status, me } = useAuth()
+  useEffect(() => {
+    if (status === 'loading') return
+    const t = setTimeout(() => {
+      nav(status === 'authed' ? resolveEntryRoute(me) : '/login', { replace: true })
+    }, 1200)
+    return () => clearTimeout(t)
+  }, [nav, status, me])
   return (
     <ImmersiveLayout>
       <div
@@ -44,7 +54,27 @@ export function Splash() {
 /* 2 — Login */
 export function Login() {
   const nav = useNavigate()
+  const { requestOtp } = useAuth()
   const [num, setNum] = useState('98765 43210')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const submit = async () => {
+    const digits = num.replace(/\D/g, '')
+    if (digits.length < 10) { setErr('Enter a valid 10-digit number'); return }
+    const phone = `+91${digits}`
+    setBusy(true)
+    setErr('')
+    try {
+      await requestOtp(phone)
+      nav('/otp', { state: { phone } })
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not send code. Try again.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <CenterLayout>
       <StatusBar />
@@ -58,10 +88,13 @@ export function Login() {
           <div className="input w-[86px] flex items-center justify-center gap-1 font-semibold">🇮🇳 +91</div>
           <input value={num} onChange={(e) => setNum(e.target.value)} className="input flex-1" inputMode="numeric" />
         </div>
+        <ErrorCard message={err} compact className="mt-2" />
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-black/[.03] px-3 py-2.5 text-[12px] text-ink-400">
           <Icon name="shield" size={15} className="mt-0.5 shrink-0" /> By continuing you agree to the Terms and Privacy Policy.
         </div>
-        <button onClick={() => nav('/otp')} className="btn-primary mt-4"><Icon name="chevron-right" size={18} /> Send code</button>
+        <button onClick={submit} disabled={busy} className="btn-primary mt-4 disabled:opacity-60">
+          <Icon name="chevron-right" size={18} /> {busy ? 'Sending…' : 'Send code'}
+        </button>
       </div>
     </CenterLayout>
   )
@@ -70,23 +103,77 @@ export function Login() {
 /* 3 — OTP */
 export function Otp() {
   const nav = useNavigate()
-  const [code, setCode] = useState(['1', '2', '3', '', '', ''])
-  const set = (i, v) => setCode((c) => c.map((x, j) => (j === i ? v.slice(-1) : x)))
+  const location = useLocation()
+  const { verifyOtp, requestOtp, pendingPhone } = useAuth()
+  const phone = location.state?.phone || pendingPhone
+  const [code, setCode] = useState(['', '', '', '', '', ''])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [seconds, setSeconds] = useState(30)
+  const inputsRef = useRef([])
+
+  useEffect(() => {
+    if (!phone) { nav('/login', { replace: true }); return }
+  }, [phone, nav])
+
+  useEffect(() => {
+    if (seconds <= 0) return
+    const t = setTimeout(() => setSeconds((s) => s - 1), 1000)
+    return () => clearTimeout(t)
+  }, [seconds])
+
+  const set = (i, v) => {
+    const d = v.replace(/\D/g, '').slice(-1)
+    setCode((c) => c.map((x, j) => (j === i ? d : x)))
+    if (d && i < 5) inputsRef.current[i + 1]?.focus()
+  }
+
+  const submit = async () => {
+    const joined = code.join('')
+    if (joined.length !== 6) { setErr('Enter the full 6-digit code'); return }
+    setBusy(true)
+    setErr('')
+    try {
+      const me = await verifyOtp(phone, joined)
+      nav(resolveEntryRoute(me), { replace: true })
+    } catch (e) {
+      setErr(errorMessage(e, 'Invalid code. Try again.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const resend = async () => {
+    if (seconds > 0 || !phone) return
+    setErr('')
+    try {
+      await requestOtp(phone)
+      setSeconds(30)
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not resend code.'))
+    }
+  }
+
+  const mmss = `00:${String(seconds).padStart(2, '0')}`
+
   return (
     <CenterLayout>
       <StatusBar />
       <TopBar title="Verify number" />
       <div className="flex-1 px-6 pt-5 pb-8">
         <h1 className="text-[24px] font-extrabold text-ink-900 lg:mt-4">Enter the code</h1>
-        <p className="text-[14px] text-ink-400 mt-1">Sent to +91 98765 43210</p>
+        <p className="text-[14px] text-ink-400 mt-1">Sent to {phone}</p>
         <div className="mt-5 flex gap-2.5">
           {code.map((d, i) => (
-            <input key={i} value={d} onChange={(e) => set(i, e.target.value)} inputMode="numeric"
+            <input key={i} ref={(el) => (inputsRef.current[i] = el)} value={d} onChange={(e) => set(i, e.target.value)} inputMode="numeric"
               className={`h-16 flex-1 rounded-2xl border text-center text-[22px] font-bold outline-none ${d ? 'border-brand-500 text-ink-900' : 'border-black/10'} focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20`} />
           ))}
         </div>
-        <div className="mt-3 flex items-center gap-1.5 text-[13px] text-ink-400"><Icon name="clock" size={14} /> Resend in 00:24</div>
-        <button onClick={() => nav('/onboarding/profile')} className="btn-primary mt-5">Verify</button>
+        <ErrorCard message={err} compact className="mt-2" />
+        <button onClick={resend} disabled={seconds > 0} className="mt-3 flex items-center gap-1.5 text-[13px] text-ink-400 disabled:opacity-100 enabled:text-brand-600 enabled:font-semibold">
+          <Icon name="clock" size={14} /> {seconds > 0 ? `Resend in ${mmss}` : 'Resend code'}
+        </button>
+        <button onClick={submit} disabled={busy} className="btn-primary mt-5 disabled:opacity-60">{busy ? 'Verifying…' : 'Verify'}</button>
       </div>
     </CenterLayout>
   )
@@ -114,6 +201,31 @@ function Steps({ active }) {
 /* 4 — Profile setup */
 export function ProfileSetup() {
   const nav = useNavigate()
+  const { me, setMe } = useAuth()
+  const [name, setName] = useState(me?.name || '')
+  const [email, setEmail] = useState(me?.email || '')
+  const [languages, setLanguages] = useState((me?.languages || []).join(', ') || 'Hindi, English')
+  const [bio, setBio] = useState(me?.hostProfile?.bio || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const submit = async () => {
+    if (!name.trim()) { setErr('Display name is required'); return }
+    setBusy(true)
+    setErr('')
+    try {
+      const langs = languages.split(',').map((s) => s.trim()).filter(Boolean)
+      const updated = await profileApi.updateMe({ name: name.trim(), email: email.trim() || undefined, languages: langs })
+      await profileApi.updateHostProfile({ bio: bio.trim() || undefined, languages: langs })
+      setMe({ ...updated, hostProfile: { ...me?.hostProfile, bio, languages: langs } })
+      nav('/onboarding/kyc')
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not save your profile.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <CenterLayout>
       <StatusBar />
@@ -129,16 +241,14 @@ export function ProfileSetup() {
           <p className="text-[12px] text-ink-400 mt-2">Add a clear, well-lit photo</p>
         </div>
         <div className="mt-5 space-y-3.5 pb-5">
-          <div><span className="label">Display name</span><input className="input" defaultValue="Ayesha" /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><span className="label">Age</span><input className="input" defaultValue="24" /></div>
-            <div><span className="label">E-mail</span><input className="input" defaultValue="host@mail.com" /></div>
-          </div>
-          <div><span className="label">Languages</span><input className="input" defaultValue="Hindi, English" /></div>
-          <div><span className="label">About you</span><textarea rows={2} className="input" placeholder="Tell viewers what you love talking about" /></div>
+          <div><span className="label">Display name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div><span className="label">E-mail</span><input className="input" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+          <div><span className="label">Languages</span><input className="input" value={languages} onChange={(e) => setLanguages(e.target.value)} /></div>
+          <div><span className="label">About you</span><textarea rows={2} className="input" value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Tell viewers what you love talking about" /></div>
+          <ErrorCard message={err} compact />
         </div>
       </div>
-      <div className="p-4 border-t border-black/5"><button onClick={() => nav('/onboarding/kyc')} className="btn-primary">Continue</button></div>
+      <div className="p-4 border-t border-black/5"><button onClick={submit} disabled={busy} className="btn-primary disabled:opacity-60">{busy ? 'Saving…' : 'Continue'}</button></div>
     </CenterLayout>
   )
 }
@@ -176,9 +286,173 @@ export function KycIntro() {
   )
 }
 
+/* helper: upload a File via presigned URL, return the S3 key */
+async function uploadDocument(file) {
+  const { uploadUrl, key } = await profileApi.getKycUploadUrl(file.type || 'application/octet-stream')
+  await profileApi.uploadKycFile(uploadUrl, file)
+  return key
+}
+
+/* Live selfie capture — real camera, not a file picker. Falls back to file-upload
+ * when getUserMedia is unavailable or permission is denied (older devices, desktop
+ * without a webcam, a user who says no to the prompt). */
+function SelfieCamera({ photo, onCapture, onClear }) {
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
+  const fileRef = useRef(null)
+  const [live, setLive] = useState(false)
+  const [camErr, setCamErr] = useState('')
+  const [photoUrl, setPhotoUrl] = useState('')
+
+  useEffect(() => {
+    if (!photo) { setPhotoUrl(''); return }
+    const url = URL.createObjectURL(photo)
+    setPhotoUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [photo])
+
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+  }
+
+  const startCamera = async () => {
+    setCamErr('')
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCamErr('Camera not available on this device — upload a photo instead.')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 720 } }, audio: false })
+      streamRef.current = stream
+      setLive(true) // mounts the <video> element; the stream attaches once it exists (effect below)
+    } catch (e) {
+      setCamErr(errorMessage(e, 'Camera permission denied — upload a photo instead.'))
+    }
+  }
+
+  // The <video> element only exists in the DOM once `live` is true, so the stream can't be
+  // attached inside startCamera() itself — attach it here, after that render has committed.
+  useEffect(() => {
+    if (live && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current
+      videoRef.current.play().catch(() => {})
+    }
+  }, [live])
+
+  useEffect(() => () => stopStream(), [])
+
+  const capture = async () => {
+    const video = videoRef.current
+    if (!video) return
+    if (!video.videoWidth) {
+      await new Promise((resolve) => {
+        video.addEventListener('loadeddata', resolve, { once: true })
+        setTimeout(resolve, 2000) // don't hang forever if the stream never loads
+      })
+    }
+    if (!video.videoWidth) { setCamErr('Camera feed not ready yet — try again.'); return }
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    canvas.getContext('2d').drawImage(video, 0, 0)
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      onCapture(new File([blob], 'selfie.jpg', { type: 'image/jpeg' }))
+      stopStream()
+      setLive(false)
+    }, 'image/jpeg', 0.92)
+  }
+
+  const retake = () => {
+    onClear()
+    startCamera()
+  }
+
+  if (photo) {
+    return (
+      <div className="mt-2 aspect-[3/2] w-full rounded-2xl overflow-hidden relative bg-black">
+        {photoUrl && <img src={photoUrl} alt="Selfie" className="absolute inset-0 h-full w-full object-cover" />}
+        <button onClick={retake} className="absolute bottom-3 right-3 pill bg-black/50 text-white text-[12px]"><Icon name="refresh" size={13} /> Retake</button>
+      </div>
+    )
+  }
+
+  if (live) {
+    return (
+      <div className="mt-2 aspect-[3/2] w-full rounded-2xl overflow-hidden relative bg-black">
+        <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+        <div className="absolute inset-0 grid place-items-center pointer-events-none">
+          <div className="h-40 w-52 rounded-[50%] border-2 border-dashed border-white/60" />
+        </div>
+        <button onClick={capture} className="absolute bottom-3 left-1/2 -translate-x-1/2 h-14 w-14 rounded-full bg-white ring-4 ring-white/30 active:scale-95" aria-label="Capture selfie" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-2 aspect-[3/2] w-full rounded-2xl bg-gradient-to-br from-brand-400 to-night-800 grid place-items-center relative overflow-hidden">
+      <button onClick={startCamera} className="flex flex-col items-center gap-2 text-white">
+        <div className="h-40 w-52 rounded-[50%] border-2 border-dashed border-white/50 grid place-items-center"><Icon name="camera" size={30} className="text-white/70" /></div>
+        <span className="text-[13px] font-semibold">Tap to open camera</span>
+      </button>
+      {camErr && (
+        <div className="absolute bottom-3 inset-x-3 text-center">
+          <span className="text-[11px] text-white/90 bg-black/40 rounded-lg px-2.5 py-1.5 inline-block">{camErr}</span>
+        </div>
+      )}
+      <button onClick={() => fileRef.current?.click()} className="absolute top-3 right-3 pill bg-black/40 text-white text-[11px]"><Icon name="upload" size={12} /> Upload instead</button>
+      <input ref={fileRef} type="file" accept="image/*" capture="user" hidden onChange={(e) => e.target.files?.[0] && onCapture(e.target.files[0])} />
+    </div>
+  )
+}
+
 /* 6 — Document upload */
 export function DocumentUpload() {
   const nav = useNavigate()
+  const [front, setFront] = useState(null)
+  const [back, setBack] = useState(null)
+  const [selfie, setSelfie] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const frontRef = useRef(null)
+  const backRef = useRef(null)
+
+  const submit = async () => {
+    if (!front) { setErr('Front of your ID is required'); return }
+    setBusy(true)
+    setErr('')
+    try {
+      const documents = []
+      const frontKey = await uploadDocument(front)
+      documents.push({ documentType: 'id_front', key: frontKey })
+      if (back) documents.push({ documentType: 'id_back', key: await uploadDocument(back) })
+      if (selfie) documents.push({ documentType: 'selfie', key: await uploadDocument(selfie) })
+      await profileApi.submitKyc(documents)
+      nav('/onboarding/payout')
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not submit documents.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const Tile = ({ file, label, onPick, dashed }) => (
+    <button
+      onClick={onPick}
+      className={`relative aspect-[3/2] rounded-2xl grid place-items-center ${file ? 'bg-black/[.06] border border-black/10' : `border-2 border-dashed ${dashed} bg-brand-50/60`}`}
+    >
+      {file ? (
+        <>
+          <span className="absolute top-2 right-2 h-5 w-5 grid place-items-center rounded-full bg-emerald-500 text-white"><Icon name="check" size={12} /></span>
+          <span className="absolute bottom-2 left-2 text-[11px] font-semibold text-ink-500 truncate max-w-[80%]">{file.name}</span>
+        </>
+      ) : (
+        <span className="flex flex-col items-center gap-1 text-[12px] font-semibold text-brand-600"><Icon name="upload" size={18} /> {label}</span>
+      )}
+    </button>
+  )
+
   return (
     <CenterLayout>
       <StatusBar />
@@ -187,31 +461,85 @@ export function DocumentUpload() {
         <div className="h-1.5 rounded-full bg-black/10 my-3 overflow-hidden"><div className="h-full w-2/5 bg-brand-600" /></div>
         <SectionTitle className="mt-2">Government ID</SectionTitle>
         <div className="mt-2 grid grid-cols-2 gap-3">
-          <div className="relative aspect-[3/2] rounded-2xl bg-black/[.06] border border-black/10 grid place-items-center">
-            <span className="absolute top-2 right-2 h-5 w-5 grid place-items-center rounded-full bg-emerald-500 text-white"><Icon name="check" size={12} /></span>
-            <span className="absolute bottom-2 left-2 text-[11px] font-semibold text-ink-400">Front</span>
-          </div>
-          <div className="aspect-[3/2] rounded-2xl border-2 border-dashed border-brand-400 bg-brand-50/60 grid place-items-center text-brand-600">
-            <span className="flex flex-col items-center gap-1 text-[12px] font-semibold"><Icon name="upload" size={18} /> Back side</span>
-          </div>
+          <Tile file={front} label="Front" onPick={() => frontRef.current?.click()} dashed="border-brand-400" />
+          <Tile file={back} label="Back side" onPick={() => backRef.current?.click()} dashed="border-brand-400" />
         </div>
+        <input ref={frontRef} type="file" accept="image/*,application/pdf" hidden onChange={(e) => setFront(e.target.files?.[0] || null)} />
+        <input ref={backRef} type="file" accept="image/*,application/pdf" hidden onChange={(e) => setBack(e.target.files?.[0] || null)} />
         <SectionTitle className="mt-5">Selfie check</SectionTitle>
-        <div className="mt-2 aspect-[3/2] rounded-2xl bg-gradient-to-br from-brand-400 to-night-800 grid place-items-center">
-          <div className="h-40 w-52 rounded-[50%] border-2 border-dashed border-white/50 grid place-items-center"><Icon name="camera" size={30} className="text-white/70" /></div>
-        </div>
+        <SelfieCamera photo={selfie} onCapture={setSelfie} onClear={() => setSelfie(null)} />
         <div className="mt-4 flex items-start gap-2 rounded-xl bg-gold-50 px-3 py-2.5 text-[12px] text-gold-600">
           <Icon name="alert" size={15} className="mt-0.5 shrink-0" /> Make sure all four corners are visible and text is readable.
         </div>
+        <ErrorCard message={err} compact className="mt-2" />
       </div>
-      <div className="p-4"><button onClick={() => nav('/onboarding/payout')} className="btn-primary">Submit for review</button></div>
+      <div className="p-4"><button onClick={submit} disabled={busy} className="btn-primary disabled:opacity-60">{busy ? 'Uploading…' : 'Submit for review'}</button></div>
     </CenterLayout>
   )
 }
 
 /* 7 — Payout account (onboarding + standalone) */
+const ACCOUNT_MIN = 9
+const ACCOUNT_MAX = 18
+const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/
+
+function accountNumberError(v) {
+  if (!v) return ''
+  if (v.length > ACCOUNT_MAX) return `Account number exceeds the ${ACCOUNT_MAX}-digit limit`
+  if (v.length < ACCOUNT_MIN) return `Account number must be at least ${ACCOUNT_MIN} digits`
+  return ''
+}
+
+function ifscError(v) {
+  if (!v) return ''
+  if (v.length > 11) return 'IFSC exceeds the 11-character limit'
+  if (v.length < 11) return 'IFSC must be exactly 11 characters'
+  if (!IFSC_RE.test(v)) return 'Invalid IFSC format — expected e.g. HDFC0001234'
+  return ''
+}
+
+function vpaError(v) {
+  if (!v) return ''
+  if (!/^[\w.\-]{2,}@[\w.\-]{2,}$/.test(v)) return 'Enter a valid UPI ID, e.g. name@bank'
+  return ''
+}
+
 export function PayoutAccount({ standalone }) {
   const nav = useNavigate()
   const [tab, setTab] = useState('Bank transfer')
+  const [holder, setHolder] = useState('Ayesha Khan')
+  const [accountNumber, setAccountNumber] = useState('')
+  const [ifsc, setIfsc] = useState('')
+  const [vpa, setVpa] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const holderErr = holder.trim() === '' ? '' : (holder.trim().length < 2 ? 'Enter the full account holder name' : '')
+  const acctErr = accountNumberError(accountNumber)
+  const ifscErr = ifscError(ifsc)
+  const upiErr = vpaError(vpa)
+  const bankValid = holder.trim().length >= 2 && accountNumber.length >= ACCOUNT_MIN && accountNumber.length <= ACCOUNT_MAX && !acctErr && IFSC_RE.test(ifsc)
+  const upiValid = vpa.trim() !== '' && !upiErr
+
+  const submit = async () => {
+    setErr('')
+    if (tab === 'Bank transfer' && !bankValid) { setErr('Fix the highlighted fields before saving'); return }
+    if (tab === 'UPI' && !upiValid) { setErr('Enter a valid UPI ID'); return }
+    setBusy(true)
+    try {
+      if (tab === 'Bank transfer') {
+        await profileApi.addPayoutMethod({ type: 'bank', accountHolderName: holder.trim(), accountNumber: accountNumber.trim(), ifsc: ifsc.trim().toUpperCase() })
+      } else {
+        await profileApi.addPayoutMethod({ type: 'upi', vpa: vpa.trim() })
+      }
+      nav(standalone ? '/settings/payouts' : '/onboarding/review')
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not save payout account.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const body = (
     <>
       <div className="flex gap-2 my-3">
@@ -221,31 +549,62 @@ export function PayoutAccount({ standalone }) {
       </div>
       {tab === 'Bank transfer' ? (
         <div className="space-y-3.5">
-          <div><span className="label">Account holder</span><input className="input" defaultValue="Ayesha Khan" /></div>
-          <div><span className="label">Account number</span><input className="input" defaultValue="•••• •••• 4821" /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><span className="label">IFSC code</span><input className="input" defaultValue="HDFC0001234" /></div>
-            <div><span className="label">Bank</span><input className="input" defaultValue="HDFC Bank" /></div>
+          <div>
+            <span className="label">Account holder</span>
+            <input className={`input ${holderErr ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : ''}`} value={holder} onChange={(e) => setHolder(e.target.value)} />
+            {holderErr && <p className="text-[12px] text-rose-500 mt-1">{holderErr}</p>}
+          </div>
+          <div>
+            <span className="label">Account number</span>
+            <input
+              className={`input ${acctErr ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : ''}`}
+              value={accountNumber}
+              inputMode="numeric"
+              onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, ''))}
+              placeholder="1234567894821"
+            />
+            <div className="flex items-center justify-between mt-1">
+              {acctErr ? <p className="text-[12px] text-rose-500">{acctErr}</p> : <span />}
+              <span className={`text-[11px] ${accountNumber.length > ACCOUNT_MAX ? 'text-rose-500 font-semibold' : 'text-ink-300'}`}>{accountNumber.length}/{ACCOUNT_MAX}</span>
+            </div>
+          </div>
+          <div>
+            <span className="label">IFSC code</span>
+            <input
+              className={`input uppercase ${ifscErr ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : ''}`}
+              value={ifsc}
+              onChange={(e) => setIfsc(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+              placeholder="HDFC0001234"
+            />
+            <div className="flex items-center justify-between mt-1">
+              {ifscErr ? <p className="text-[12px] text-rose-500">{ifscErr}</p> : <span />}
+              <span className={`text-[11px] ${ifsc.length > 11 ? 'text-rose-500 font-semibold' : 'text-ink-300'}`}>{ifsc.length}/11</span>
+            </div>
           </div>
         </div>
       ) : (
         <div className="space-y-3.5">
-          <div><span className="label">UPI ID</span><input className="input" defaultValue="ayesha@upi" /></div>
-          <div><span className="label">Name on UPI</span><input className="input" defaultValue="Ayesha Khan" /></div>
+          <div>
+            <span className="label">UPI ID</span>
+            <input className={`input ${upiErr ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : ''}`} value={vpa} onChange={(e) => setVpa(e.target.value)} placeholder="ayesha@upi" />
+            {upiErr && <p className="text-[12px] text-rose-500 mt-1">{upiErr}</p>}
+          </div>
         </div>
       )}
+      <ErrorCard message={err} compact className="mt-2" />
       <div className="mt-4 flex items-start gap-2 rounded-xl bg-brand-50 px-3 py-2.5 text-[12px] text-brand-700">
         <Icon name="shield" size={15} className="mt-0.5 shrink-0" /> Payout details are encrypted and only used for withdrawals.
       </div>
     </>
   )
+  const formValid = tab === 'Bank transfer' ? bankValid : upiValid
   if (standalone) {
     return (
       <AppLayout title="Add payout account" back bottomNav={false} maxW="md" bg="white">
         <TopBar title="Add payout account" />
         <div className="p-4 lg:p-0">
           {body}
-          <button onClick={() => nav('/settings/payouts')} className="btn-primary mt-4">Save account</button>
+          <button onClick={submit} disabled={busy || !formValid} className="btn-primary mt-4 disabled:opacity-60">{busy ? 'Saving…' : 'Save account'}</button>
         </div>
       </AppLayout>
     )
@@ -258,7 +617,7 @@ export function PayoutAccount({ standalone }) {
         <Steps active={2} />
         {body}
       </div>
-      <div className="p-4"><button onClick={() => nav('/onboarding/review')} className="btn-primary">Save account</button></div>
+      <div className="p-4"><button onClick={submit} disabled={busy || !formValid} className="btn-primary disabled:opacity-60">{busy ? 'Saving…' : 'Save account'}</button></div>
     </CenterLayout>
   )
 }
@@ -266,8 +625,33 @@ export function PayoutAccount({ standalone }) {
 /* 8 — Under review */
 export function UnderReview() {
   const nav = useNavigate()
+  const { refreshMe } = useAuth()
+  const [checking, setChecking] = useState(false)
+  const [kyc, setKyc] = useState(null)
+  const [err, setErr] = useState('')
+
+  const check = async () => {
+    setChecking(true)
+    setErr('')
+    try {
+      const status = await profileApi.getKycStatus()
+      setKyc(status)
+      const me = await refreshMe()
+      if (me.kycStatus === 'approved') nav('/onboarding/verified', { replace: true })
+      else if (me.kycStatus === 'rejected') nav('/onboarding/rejected', { replace: true })
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not check your status.'))
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  useEffect(() => { check() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const rows = [
-    { t: 'Documents received', done: true }, { t: 'Identity check', done: true }, { t: 'Final approval', done: false },
+    { t: 'Documents received', done: true },
+    { t: 'Identity check', done: (kyc?.documents?.length || 0) > 0 },
+    { t: 'Final approval', done: false },
   ]
   return (
     <CenterLayout>
@@ -285,7 +669,8 @@ export function UnderReview() {
           ))}
         </div>
         <div className="mt-4 flex items-center gap-2 rounded-xl bg-black/[.04] px-3 py-2.5 text-[12px] text-ink-400"><Icon name="bell" size={14} /> We'll notify you the moment a decision is made.</div>
-        <button onClick={() => nav('/home')} className="btn-primary w-full max-w-sm mt-6">Go to dashboard</button>
+        <ErrorCard message={err} compact className="w-full max-w-sm mt-3" />
+        <button onClick={check} disabled={checking} className="btn-primary w-full max-w-sm mt-4 disabled:opacity-60">{checking ? 'Checking…' : 'Check status'}</button>
       </div>
     </CenterLayout>
   )
@@ -315,17 +700,19 @@ export function Verified() {
 /* 10 — Rejected */
 export function Rejected() {
   const nav = useNavigate()
+  const [reason, setReason] = useState('')
+  useEffect(() => { profileApi.getKycStatus().then((k) => setReason(k.rejectionReason || '')).catch(() => {}) }, [])
   return (
     <CenterLayout>
       <StatusBar />
       <div className="flex-1 py-10">
-        <ResultScreen tone="rose" icon="x" title="Verification rejected" desc="Reviewed on 12 Aug, 4:20 PM">
+        <ResultScreen tone="rose" icon="x" title="Verification rejected">
           <div className="rounded-xl bg-rose-50 px-3.5 py-3 text-left">
-            <p className="text-[14px] font-semibold text-rose-500 flex items-center gap-2"><Icon name="alert" size={15} /> ID photo was blurred</p>
+            <p className="text-[14px] font-semibold text-rose-500 flex items-center gap-2"><Icon name="alert" size={15} /> {reason || 'Documents did not pass review'}</p>
             <p className="text-[12px] text-rose-400 mt-1">Retake in bright light with the full document in frame.</p>
           </div>
           <button onClick={() => nav('/onboarding/documents')} className="btn-primary">Resubmit documents</button>
-          <button className="btn-outline"><Icon name="help" size={16} /> Contact support</button>
+          <button onClick={() => nav('/settings/help')} className="btn-outline"><Icon name="help" size={16} /> Contact support</button>
         </ResultScreen>
       </div>
     </CenterLayout>

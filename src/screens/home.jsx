@@ -1,17 +1,22 @@
+import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
-import { Avatar, Toggle, SectionTitle } from '../ui/kit.jsx'
+import { Avatar, Toggle, SectionTitle, ErrorCard } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { queue } from '../data.js'
+import { useAuth } from '../state/AuthContext.jsx'
+import { earnings as earningsApi, presence as presenceApi } from '../api/index.js'
+import { rupees, clockTime } from '../lib/format.js'
+import { errorMessage } from '../lib/errors.js'
 
-function MobileHead({ label, tone }) {
+function MobileHead({ label, tone, name }) {
   const nav = useNavigate()
   const t = { offline: 'bg-black/5 text-ink-500', online: 'bg-emerald-50 text-emerald-600', call: 'bg-gold-50 text-gold-600', live: 'bg-rose-50 text-rose-500' }[tone]
   return (
     <div className="lg:hidden px-5 pt-2 pb-3 flex items-center gap-2 bg-white">
-      <Avatar name="Ayesha" size={42} ring="#6d3be6" />
+      <Avatar name={name} size={42} ring="#6d3be6" />
       <div className="flex-1 min-w-0">
-        <p className="text-[16px] font-bold text-ink-900 leading-tight truncate">Hi, Ayesha</p>
+        <p className="text-[16px] font-bold text-ink-900 leading-tight truncate">Hi, {name}</p>
         <span className={`pill ${t} mt-0.5`}><span className="h-1.5 w-1.5 rounded-full bg-current" /> {label}</span>
       </div>
       {[['bell', '/notifications', 4], ['wallet', '/earnings'], ['settings', '/settings']].map(([i, to, b]) => (
@@ -34,19 +39,14 @@ function Stat({ icon, tone, value, label }) {
   )
 }
 
-function Balance() {
+function Balance({ paise, beans }) {
   return (
     <div className="rounded-2xl p-4 lg:p-5 text-white bg-gradient-to-br from-brand-600 to-brand-800 shadow-pop relative overflow-hidden">
       <div className="lg:flex lg:items-end lg:justify-between">
         <div>
           <p className="text-[11px] font-semibold tracking-wide text-white/70 uppercase">Available balance</p>
-          <p className="font-extrabold mt-1 text-[30px] lg:text-[36px]">₹ 1,840</p>
-          <p className="text-[12px] text-white/70">62,400 beans</p>
-        </div>
-        <div className="hidden lg:flex gap-6 pb-1">
-          {[['This week', '₹ 6,200'], ['Pending', '₹ 480']].map(([k, v]) => (
-            <div key={k}><p className="text-[11px] text-white/60 uppercase tracking-wide">{k}</p><p className="text-[16px] font-bold">{v}</p></div>
-          ))}
+          <p className="font-extrabold mt-1 text-[30px] lg:text-[36px]">{rupees(paise)}</p>
+          <p className="text-[12px] text-white/70">{(beans ?? 0).toLocaleString('en-IN')} beans</p>
         </div>
       </div>
       <svg viewBox="0 0 300 60" preserveAspectRatio="none" className="mt-3 w-full h-12 lg:h-16"><polyline points="0,48 50,42 90,50 140,20 190,34 240,12 300,26" fill="none" stroke="#e9c46a" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg>
@@ -54,21 +54,17 @@ function Balance() {
   )
 }
 
-const RECENT = [
-  ['Rahul', 'Video call · 12 min', '9:12 PM', 320],
-  ['Neel', 'Gift · Crown', '9:02 PM', 210],
-  ['Vikram', 'Voice call · 4 min', '8:40 PM', 96],
-]
-function RecentCard() {
+function RecentCard({ items }) {
+  if (!items?.length) return null
   return (
     <div>
       <SectionTitle className="mb-2">Recent activity</SectionTitle>
       <div className="card px-4 divide-y divide-black/5">
-        {RECENT.map(([n, s, time, a]) => (
-          <div key={n} className="flex items-center gap-3 py-3">
-            <Avatar name={n} size={40} />
-            <div className="flex-1 min-w-0"><p className="text-[15px] font-semibold text-ink-900 truncate">{n}</p><p className="text-[12px] text-ink-400 truncate">{s}</p></div>
-            <div className="text-right"><p className="text-[14px] font-bold text-emerald-600">+ ₹ {a}</p><p className="text-[11px] text-ink-300">{time}</p></div>
+        {items.map((c, i) => (
+          <div key={c.id || i} className="flex items-center gap-3 py-3">
+            <Avatar name={c.counterpartName || 'User'} size={40} />
+            <div className="flex-1 min-w-0"><p className="text-[15px] font-semibold text-ink-900 truncate">{c.counterpartName || 'User'}</p><p className="text-[12px] text-ink-400 truncate capitalize">{c.type} call · {c.status}</p></div>
+            <div className="text-right"><p className="text-[14px] font-bold text-emerald-600">+ {rupees(c.totalAmountPaise)}</p><p className="text-[11px] text-ink-300">{clockTime(c.createdAt)}</p></div>
           </div>
         ))}
       </div>
@@ -96,9 +92,46 @@ function QueueCard({ title, items }) {
 export default function Home() {
   const [sp, setSp] = useSearchParams()
   const nav = useNavigate()
-  const state = sp.get('state') || 'offline'
+  const { me } = useAuth()
+  const [dash, setDash] = useState(null)
+  const [balance, setBalance] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [toggling, setToggling] = useState(false)
+  const [err, setErr] = useState('')
+
+  const load = useCallback(async () => {
+    setErr('')
+    try {
+      const [d, s] = await Promise.all([earningsApi.dashboard(), earningsApi.summary()])
+      setDash(d)
+      setBalance(s)
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not load your dashboard.'))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const previewState = sp.get('state')
+  const state = previewState || (dash?.isOnline ? 'online' : 'offline')
   const go = (s) => setSp(s === 'offline' ? {} : { state: s })
   const label = { offline: 'Offline', online: 'Online', call: 'In call', live: 'Broadcasting' }[state]
+  const name = me?.name || 'Host'
+
+  const toggleOnline = async (next) => {
+    setToggling(true)
+    try {
+      await presenceApi.setOnline(next)
+      setDash((d) => (d ? { ...d, isOnline: next } : d))
+      go(next ? 'online' : 'offline')
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not update your status.'))
+    } finally {
+      setToggling(false)
+    }
+  }
 
   /* --- status / hero block (varies by state) --- */
   const hero = {
@@ -107,16 +140,16 @@ export default function Home() {
         <div className="flex items-center gap-3">
           <span className="grid place-items-center h-11 w-11 rounded-xl bg-black/5 text-ink-400"><Icon name="video" size={18} /></span>
           <div className="flex-1"><p className="text-[15px] font-bold text-ink-900">You're offline</p><p className="text-[12px] text-ink-400">Viewers can't call you right now</p></div>
-          <Toggle on={false} onChange={() => go('online')} />
+          <Toggle on={false} onChange={() => toggleOnline(true)} />
         </div>
-        <button onClick={() => go('online')} className="btn-primary mt-3"><Icon name="phone" size={17} /> Go online</button>
+        <button onClick={() => toggleOnline(true)} disabled={toggling} className="btn-primary mt-3 disabled:opacity-60"><Icon name="phone" size={17} /> Go online</button>
       </div>
     ),
     online: (
       <div className="card p-4 flex items-center gap-3">
         <span className="grid place-items-center h-11 w-11 rounded-xl bg-emerald-50 text-emerald-600"><Icon name="video" size={18} /></span>
-        <div className="flex-1"><p className="text-[15px] font-bold text-ink-900">You're online</p><p className="text-[12px] text-ink-400">Waiting for calls · 42 viewers nearby</p></div>
-        <Toggle on onChange={() => go('offline')} />
+        <div className="flex-1"><p className="text-[15px] font-bold text-ink-900">You're online</p><p className="text-[12px] text-ink-400">Waiting for calls</p></div>
+        <Toggle on onChange={() => toggleOnline(false)} />
       </div>
     ),
     call: (
@@ -144,9 +177,9 @@ export default function Home() {
   }[state]
 
   const stats = {
-    offline: [['wallet', 'text-gold-500', '₹ 0', 'Today'], ['phone', 'text-brand-600', '0', 'Calls'], ['star', 'text-gold-400', '4.8', 'Rating']],
-    online: [['phone', 'text-brand-600', '7', 'Calls today'], ['clock', 'text-brand-600', '1h 12m', 'Talk time'], ['gift', 'text-gold-400', '18', 'Gifts']],
-    call: [['wallet', 'text-gold-500', '₹ 164', 'This call'], ['phone', 'text-brand-600', '8', 'Calls today'], ['star', 'text-gold-400', '4.8', 'Rating']],
+    offline: [['wallet', 'text-gold-500', rupees(dash?.todayEarningsPaise), 'Today'], ['phone', 'text-brand-600', String(dash?.todayCallsCount ?? 0), 'Calls'], ['star', 'text-gold-400', dash?.rating?.average != null ? dash.rating.average.toFixed(1) : '—', 'Rating']],
+    online: [['phone', 'text-brand-600', String(dash?.todayCallsCount ?? 0), 'Calls today'], ['wallet', 'text-gold-500', rupees(dash?.todayEarningsPaise), 'Today'], ['star', 'text-gold-400', dash?.rating?.average != null ? dash.rating.average.toFixed(1) : '—', 'Rating']],
+    call: [['wallet', 'text-gold-500', '₹ 164', 'This call'], ['phone', 'text-brand-600', String(dash?.todayCallsCount ?? 0), 'Calls today'], ['star', 'text-gold-400', dash?.rating?.average != null ? dash.rating.average.toFixed(1) : '—', 'Rating']],
     live: [['eye', 'text-brand-600', '1.2k', 'Viewers'], ['gift', 'text-gold-400', '64', 'Gifts'], ['heart', 'text-rose-500', '9.4k', 'Likes']],
   }[state]
 
@@ -157,78 +190,86 @@ export default function Home() {
 
   return (
     <AppLayout tab="/home" title={`Dashboard · ${label}`} maxW="xl" bg="canvas">
-      <MobileHead label={label} tone={state} />
+      <MobileHead label={label} tone={state} name={name} />
 
       {/* desktop greeting */}
       <div className="hidden lg:flex items-center gap-3 mb-6">
-        <Avatar name="Ayesha" size={48} ring="#6d3be6" />
+        <Avatar name={name} size={48} ring="#6d3be6" />
         <div>
-          <p className="text-[20px] font-extrabold text-ink-900">Hi, Ayesha</p>
+          <p className="text-[20px] font-extrabold text-ink-900">Hi, {name}</p>
           <p className="text-[13px] text-ink-400">{state === 'offline' ? "You're offline — viewers can't reach you" : `You're ${label.toLowerCase()}`}</p>
         </div>
       </div>
 
-      <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4 grid gap-4 lg:grid-cols-[1fr_320px] lg:items-start">
-        {/* main column */}
-        <div className="space-y-4">
-          {hero}
-          {showBalance && <div className="lg:hidden"><Balance /></div>}
-          <div className="hidden lg:block"><Balance /></div>
-          <div className={`grid grid-cols-3 gap-3 ${state === 'live' ? 'lg:hidden' : ''}`}>
-            {stats.map(([i, t, v, l]) => <Stat key={l} icon={i} tone={t} value={v} label={l} />)}
-          </div>
-          {state === 'call' && (
-            <div className="flex items-center gap-2 rounded-xl bg-gold-50 px-3 py-2.5 text-[12px] text-gold-600"><Icon name="alert" size={14} /> New call requests are paused while you're busy.</div>
-          )}
-          {state === 'live' && (
-            <>
-              <button onClick={() => nav('/live/summary')} className="btn-danger-outline"><Icon name="x" size={16} /> End broadcast</button>
-              <div>
-                <SectionTitle className="mb-2">Top gifters</SectionTitle>
-                <div className="card px-4 divide-y divide-black/5">
-                  {[['Neel', 'Crown ×2', '4,200'], ['Aman', 'Rocket ×1', '2,100']].map(([n, g, b]) => (
-                    <div key={n} className="flex items-center gap-3 py-3">
-                      <Avatar name={n} size={40} />
-                      <div className="flex-1"><p className="text-[15px] font-semibold text-ink-900">{n}</p><p className="text-[12px] text-ink-400">{g}</p></div>
-                      <span className="text-[13px] font-bold text-ink-900">{b} <span className="text-ink-400 font-medium">beans</span></span>
-                    </div>
-                  ))}
+      {loading ? (
+        <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4 space-y-4 animate-pulse">
+          <div className="h-24 rounded-2xl bg-black/[.06]" />
+          <div className="grid grid-cols-3 gap-3">{[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-2xl bg-black/[.06]" />)}</div>
+        </div>
+      ) : (
+        <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4 grid gap-4 lg:grid-cols-[1fr_320px] lg:items-start">
+          {/* main column */}
+          <div className="space-y-4">
+            <ErrorCard message={err} onRetry={load} compact />
+            {hero}
+            {showBalance && <div className="lg:hidden"><Balance paise={balance?.availableBalancePaise} beans={balance?.beanBalance} /></div>}
+            <div className="hidden lg:block"><Balance paise={balance?.availableBalancePaise} beans={balance?.beanBalance} /></div>
+            <div className={`grid grid-cols-3 gap-3 ${state === 'live' ? 'lg:hidden' : ''}`}>
+              {stats.map(([i, t, v, l]) => <Stat key={l} icon={i} tone={t} value={v} label={l} />)}
+            </div>
+            {state === 'call' && (
+              <div className="flex items-center gap-2 rounded-xl bg-gold-50 px-3 py-2.5 text-[12px] text-gold-600"><Icon name="alert" size={14} /> New call requests are paused while you're busy.</div>
+            )}
+            {state === 'live' && (
+              <>
+                <button onClick={() => nav('/live/summary')} className="btn-danger-outline"><Icon name="x" size={16} /> End broadcast</button>
+                <div>
+                  <SectionTitle className="mb-2">Top gifters</SectionTitle>
+                  <div className="card px-4 divide-y divide-black/5">
+                    {[['Neel', 'Crown ×2', '4,200'], ['Aman', 'Rocket ×1', '2,100']].map(([n, g, b]) => (
+                      <div key={n} className="flex items-center gap-3 py-3">
+                        <Avatar name={n} size={40} />
+                        <div className="flex-1"><p className="text-[15px] font-semibold text-ink-900">{n}</p><p className="text-[12px] text-ink-400">{g}</p></div>
+                        <span className="text-[13px] font-bold text-ink-900">{b} <span className="text-ink-400 font-medium">beans</span></span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
-          <div className="card p-3.5 flex items-center gap-3">
-            <span className="grid place-items-center h-10 w-10 rounded-full border-2 border-dashed border-brand-300 text-brand-500 shrink-0"><Icon name="trending-up" size={16} /></span>
-            <div><p className="text-[14px] font-semibold text-ink-900">Peak hours start at 8 PM</p><p className="text-[12px] text-ink-400">Hosts online at peak earn 2.4× more on average.</p></div>
+              </>
+            )}
+            <div className="card p-3.5 flex items-center gap-3">
+              <span className="grid place-items-center h-10 w-10 rounded-full border-2 border-dashed border-brand-300 text-brand-500 shrink-0"><Icon name="trending-up" size={16} /></span>
+              <div><p className="text-[14px] font-semibold text-ink-900">Peak hours start at 8 PM</p><p className="text-[12px] text-ink-400">Hosts online at peak earn 2.4× more on average.</p></div>
+            </div>
+            {(state === 'offline' || state === 'online') && <RecentCard items={dash?.recentCalls} />}
           </div>
-          {(state === 'offline' || state === 'online') && <RecentCard />}
-        </div>
 
-        {/* right rail */}
-        <div className="space-y-4">
-          {(state === 'online' || state === 'call') && <QueueCard {...q1} />}
-          {state === 'online' && (
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => nav('/call/incoming')} className="btn-outline text-[13px]">Preview call</button>
-              <button onClick={() => go('live')} className="btn-outline text-[13px]">Go live</button>
-            </div>
-          )}
-          {state === 'offline' && (
-            <div className="hidden lg:block card p-4">
-              <SectionTitle className="mb-2">Today's tip</SectionTitle>
-              <p className="text-[13px] text-ink-500">Hosts who add a short bio and 3+ gallery photos get <span className="font-semibold text-ink-900">40% more calls</span>. Complete your profile before going online.</p>
-              <button onClick={() => nav('/settings/edit-profile')} className="btn-outline mt-3 text-[13px]">Edit profile</button>
-            </div>
-          )}
-          {state === 'live' && (
-            <div className="hidden lg:grid grid-cols-1 gap-3">
-              <Stat icon="eye" tone="text-brand-600" value="1.2k" label="Viewers" />
-              <Stat icon="gift" tone="text-gold-400" value="64" label="Gifts" />
-              <Stat icon="heart" tone="text-rose-500" value="9.4k" label="Likes" />
-            </div>
-          )}
+          {/* right rail */}
+          <div className="space-y-4">
+            {(state === 'online' || state === 'call') && <QueueCard {...q1} />}
+            {state === 'online' && (
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => nav('/call/incoming')} className="btn-outline text-[13px]">Preview call</button>
+                <button onClick={() => nav('/live')} className="btn-outline text-[13px]">Go live</button>
+              </div>
+            )}
+            {state === 'offline' && (
+              <div className="hidden lg:block card p-4">
+                <SectionTitle className="mb-2">Today's tip</SectionTitle>
+                <p className="text-[13px] text-ink-500">Hosts who add a short bio and 3+ gallery photos get <span className="font-semibold text-ink-900">40% more calls</span>. Complete your profile before going online.</p>
+                <button onClick={() => nav('/settings/edit-profile')} className="btn-outline mt-3 text-[13px]">Edit profile</button>
+              </div>
+            )}
+            {state === 'live' && (
+              <div className="hidden lg:grid grid-cols-1 gap-3">
+                <Stat icon="eye" tone="text-brand-600" value="1.2k" label="Viewers" />
+                <Stat icon="gift" tone="text-gold-400" value="64" label="Gifts" />
+                <Stat icon="heart" tone="text-rose-500" value="9.4k" label="Likes" />
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </AppLayout>
   )
 }

@@ -229,3 +229,27 @@ export function KV({ k, v, strong, danger }) {
 export function SectionTitle({ children, className = '' }) {
   return <p className={`text-[12px] font-semibold tracking-wide text-ink-400 uppercase ${className}`}>{children}</p>
 }
+
+/** Consistent error display for the real message the backend sent back — never a swallowed
+ * failure. `compact` for under a form field; the default block form for a whole screen/section
+ * that failed to load, with an optional Retry action. */
+export function ErrorCard({ message, onRetry, compact = false, className = '' }) {
+  if (!message) return null
+  if (compact) {
+    return (
+      <div className={`rounded-xl bg-rose-50 border border-rose-100 px-3.5 py-3 flex items-start gap-2.5 ${className}`}>
+        <Icon name="alert" size={16} className="text-rose-500 mt-0.5 shrink-0" />
+        <p className="flex-1 min-w-0 text-[13px] text-rose-600 font-medium leading-snug">{message}</p>
+        {onRetry && <button onClick={onRetry} className="shrink-0 text-[12px] font-semibold text-rose-600">Retry</button>}
+      </div>
+    )
+  }
+  return (
+    <div className={`flex flex-col items-center text-center px-6 py-10 ${className}`}>
+      <span className="grid place-items-center h-14 w-14 rounded-full bg-rose-50 text-rose-500"><Icon name="alert" size={26} /></span>
+      <p className="mt-3 text-[14px] font-semibold text-ink-900">Couldn't load this</p>
+      <p className="mt-1 text-[13px] text-ink-400 max-w-xs">{message}</p>
+      {onRetry && <button onClick={onRetry} className="btn-outline mt-4 text-[13px] px-5 w-auto"><Icon name="refresh" size={14} /> Try again</button>}
+    </div>
+  )
+}

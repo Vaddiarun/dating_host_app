@@ -1,16 +1,19 @@
-import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
-import { StatusBar, PlainHeader, TopBar, Avatar, Segmented, IconBadge, ResultScreen, SectionTitle } from '../ui/kit.jsx'
+import { StatusBar, PlainHeader, TopBar, Avatar, Segmented, IconBadge, ResultScreen, SectionTitle, ErrorCard } from '../ui/kit.jsx'
 import { AppLayout, ImmersiveLayout, CenterLayout } from '../ui/layouts.jsx'
-import { notifications, reportReasons, gifts } from '../data.js'
+import { notifications, reportReasons } from '../data.js'
+import { moderation as moderationApi, gifts as giftsApi } from '../api/index.js'
+import { useAuth } from '../state/AuthContext.jsx'
+import { errorMessage } from '../lib/errors.js'
 
 /* 44 — Notifications */
 export function Notifications() {
   const [f, setF] = useState('All')
   return (
     <AppLayout tab="/notifications" title="Notifications" back bottomNav={false} maxW="lg" bg="canvas">
-      <TopBar title="Notifications" sub="4 new" />
+      <TopBar title="Notifications" />
       <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-6">
         <Segmented options={['All', 'Money', 'Calls', 'System']} value={f} onChange={setF} />
         {notifications.map((g) => (
@@ -30,6 +33,9 @@ export function Notifications() {
             </div>
           </div>
         ))}
+        <div className="mt-5 rounded-xl bg-brand-50 px-3 py-2.5 text-[12px] text-brand-700 flex items-start gap-2">
+          <Icon name="alert" size={14} className="mt-0.5 shrink-0" /> Sample notifications — the backend doesn't expose a notifications feed yet.
+        </div>
       </div>
     </AppLayout>
   )
@@ -38,14 +44,36 @@ export function Notifications() {
 /* 45 — Report user */
 export function ReportUser() {
   const nav = useNavigate()
+  const location = useLocation()
+  const targetId = location.state?.targetId
+  const targetName = location.state?.targetName || 'this user'
   const [sel, setSel] = useState(reportReasons[0])
+  const [notes, setNotes] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const submit = async () => {
+    setBusy(true)
+    setErr('')
+    try {
+      if (targetId) {
+        await moderationApi.report('user', targetId, notes.trim() ? `${sel} — ${notes.trim()}` : sel)
+      }
+      nav('/report/submitted')
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not submit the report.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <AppLayout tab="/calls" title="Report user" back bottomNav={false} maxW="md" bg="white">
       <TopBar title="Report user" />
       <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
         <div className="flex items-center gap-3">
-          <Avatar name="Rahul" size={44} />
-          <div><p className="text-[15px] font-semibold text-ink-900">Rahul</p><p className="text-[12px] text-ink-400">Video call · today, 9:12 PM</p></div>
+          <Avatar name={targetName} size={44} />
+          <div><p className="text-[15px] font-semibold text-ink-900">{targetName}</p></div>
         </div>
         <SectionTitle className="mt-5 mb-2">What happened?</SectionTitle>
         <div className="card divide-y divide-black/5">
@@ -56,11 +84,12 @@ export function ReportUser() {
             </button>
           ))}
         </div>
-        <textarea rows={2} placeholder="Add details (optional)" className="input mt-3" />
+        <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Add details (optional)" className="input mt-3" />
+        <ErrorCard message={err} compact className="mt-3" />
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-brand-50 px-3 py-2.5 text-[12px] text-brand-700">
           <Icon name="shield" size={14} className="mt-0.5 shrink-0" /> Reports are confidential. The user is never told who reported them.
         </div>
-        <button onClick={() => nav('/report/submitted')} className="btn-danger-outline mt-4"><Icon name="flag" size={16} /> Submit report</button>
+        <button onClick={submit} disabled={busy} className="btn-danger-outline mt-4 disabled:opacity-60"><Icon name="flag" size={16} /> {busy ? 'Submitting…' : 'Submit report'}</button>
       </div>
     </AppLayout>
   )
@@ -72,9 +101,9 @@ export function ReportSubmitted() {
   return (
     <AppLayout tab="/calls" title="Report" back bottomNav={false} maxW="md" bg="white">
       <div className="py-8">
-        <ResultScreen tone="green" icon="check" title="Report submitted" desc="Reference SR-4471 · 25 Aug, 9:20 PM">
+        <ResultScreen tone="green" icon="check" title="Report submitted" desc="Our safety team will review it shortly">
           <div className="card p-4 text-left space-y-3">
-            {[['shield', 'Our safety team reviews within 24 hours'], ['ban', 'Rahul has been blocked automatically'], ['bell', "We'll notify you of the outcome"]].map(([i, t]) => (
+            {[['shield', 'Our safety team reviews within 24 hours'], ['bell', "We'll notify you of the outcome"]].map(([i, t]) => (
               <div key={t} className="flex items-center gap-3"><span className="grid place-items-center h-8 w-8 rounded-lg bg-brand-50 text-brand-600"><Icon name={i} size={15} /></span><span className="text-[13px] text-ink-700">{t}</span></div>
             ))}
           </div>
@@ -89,7 +118,25 @@ export function ReportSubmitted() {
 /* 46 — Block user */
 export function BlockUser() {
   const nav = useNavigate()
-  const { name = 'Rahul' } = useParams()
+  const { id } = useParams()
+  const location = useLocation()
+  const name = location.state?.name || 'this user'
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const confirm = async () => {
+    setBusy(true)
+    setErr('')
+    try {
+      if (id) await moderationApi.block(id)
+      nav(`/blocked/${id}`, { state: { name } })
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not block this user.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <AppLayout tab="/chat" title={name} back bottomNav={false} maxW="md" bg="canvas">
       <div className="fixed inset-0 z-[70] flex flex-col justify-end lg:justify-center lg:items-center" onClick={() => nav(-1)}>
@@ -100,9 +147,10 @@ export function BlockUser() {
             <div><p className="text-[17px] font-bold text-ink-900">Block {name}?</p><p className="text-[13px] text-ink-400 mt-0.5">They won't be able to call or message you, and your profile is hidden from them. You can unblock any time from Settings.</p></div>
           </div>
           <div className="mt-3 flex items-center gap-2 rounded-xl bg-gold-50 px-3 py-2.5 text-[12px] text-gold-600"><Icon name="alert" size={14} /> Blocking also ends any active call with this user.</div>
+          <ErrorCard message={err} compact className="mt-3" />
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button onClick={() => nav(-1)} className="btn-outline">Cancel</button>
-            <button onClick={() => nav('/blocked/Aanya')} className="btn-danger-outline"><Icon name="ban" size={16} /> Block</button>
+            <button onClick={confirm} disabled={busy} className="btn-danger-outline disabled:opacity-60"><Icon name="ban" size={16} /> {busy ? 'Blocking…' : 'Block'}</button>
           </div>
         </div>
       </div>
@@ -113,7 +161,8 @@ export function BlockUser() {
 /* 58 — Blocked confirmation */
 export function Blocked() {
   const nav = useNavigate()
-  const { name = 'Aanya' } = useParams()
+  const location = useLocation()
+  const name = location.state?.name || 'They'
   return (
     <AppLayout tab="/chat" title="Blocked" back bottomNav={false} maxW="md" bg="white">
       <div className="py-8">
@@ -130,8 +179,41 @@ export function Blocked() {
 export function AskGift() {
   const nav = useNavigate()
   const { ctx } = useParams()
-  const isLive = ctx === 'live'
-  const [pick, setPick] = useState('crown')
+  const location = useLocation()
+  const userId = location.state?.userId
+  const isLive = ctx?.startsWith('live')
+  const [catalog, setCatalog] = useState([])
+  const [pick, setPick] = useState(null)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [catalogErr, setCatalogErr] = useState('')
+  const [sendErr, setSendErr] = useState('')
+
+  const loadCatalog = () => {
+    setCatalogErr('')
+    giftsApi.catalog().then((res) => {
+      const list = res.gifts || []
+      setCatalog(list)
+      setPick(list[0]?.id || null)
+    }).catch((e) => setCatalogErr(errorMessage(e, 'Could not load the gift catalog.')))
+  }
+  useEffect(loadCatalog, [])
+
+  const send = async () => {
+    if (!pick) return
+    setBusy(true)
+    setSendErr('')
+    try {
+      if (userId) await giftsApi.request(userId, pick)
+      setSent(true)
+      setTimeout(() => nav(-1), 1200)
+    } catch (e) {
+      setSendErr(errorMessage(e, 'Could not send that request.'))
+      setBusy(false)
+    }
+  }
+
   return (
     <ImmersiveLayout>
       <div className="mx-auto flex min-h-[100dvh] max-w-[520px] flex-col text-white bg-gradient-to-b from-night-700 via-night-800 to-night-900">
@@ -139,13 +221,11 @@ export function AskGift() {
         <div className="px-4">
           {isLive ? (
             <div className="flex items-center gap-2">
-              <span className="pill bg-black/40 text-white text-[12px]"><Avatar name="Ayesha" size={20} /> Ayesha <span className="text-rose-400 font-bold">● LIVE</span></span>
-              <span className="pill bg-black/40 text-white text-[12px]"><Icon name="eye" size={12} /> 1,204</span>
-              <span className="ml-auto pill bg-black/40 text-gold-300 text-[12px] font-bold">8,420</span>
+              <span className="pill bg-black/40 text-white text-[12px]"><Avatar name="You" size={20} /> You <span className="text-rose-400 font-bold">● LIVE</span></span>
             </div>
           ) : (
             <div className="rounded-2xl bg-white/8 px-3.5 py-2.5 flex items-center gap-3 border border-white/10">
-              <Avatar name="Rahul" size={34} /><span className="flex-1 text-[15px] font-semibold">Rahul</span><span className="text-[12px] text-white/60">08:12</span>
+              <Avatar name="Caller" size={34} /><span className="flex-1 text-[15px] font-semibold">Caller</span>
             </div>
           )}
         </div>
@@ -153,24 +233,32 @@ export function AskGift() {
         <div className="bg-white rounded-t-3xl p-5 pt-4 text-ink-900 animate-sheet-up max-h-[80dvh] overflow-y-auto no-scrollbar">
           <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-black/15" />
           <h3 className="text-[17px] font-bold">Ask for a gift</h3>
-          <div className="grid grid-cols-3 gap-2.5 mt-2.5">
-            {gifts.map((g) => (
-              <button key={g.key} onClick={() => setPick(g.key)} className={`rounded-2xl border py-2.5 flex flex-col items-center gap-0.5 ${pick === g.key ? 'border-gold-400 bg-gold-50' : 'border-black/10'}`}>
-                <span className="text-xl">{g.emoji}</span>
-                <span className="text-[13px] font-semibold">{g.label}</span>
-                <span className="text-[12px] font-bold text-gold-500">{g.beans.toLocaleString()}</span>
-              </button>
-            ))}
-          </div>
-          <input placeholder="Add a sweet note…" className="input mt-2.5" />
-          <button onClick={() => nav('/gift/received')} className="btn-gold mt-2.5"><Icon name="gift" size={16} /> Send request</button>
+          {sent ? (
+            <p className="text-[13px] text-emerald-600 font-semibold mt-3 flex items-center gap-2"><Icon name="check" size={16} /> Request sent!</p>
+          ) : (
+            <>
+              {catalog.length === 0 && <ErrorCard message={catalogErr} onRetry={loadCatalog} className="mt-2.5" />}
+              <div className="grid grid-cols-3 gap-2.5 mt-2.5">
+                {catalog.map((g) => (
+                  <button key={g.id} onClick={() => setPick(g.id)} className={`rounded-2xl border py-2.5 flex flex-col items-center gap-0.5 ${pick === g.id ? 'border-gold-400 bg-gold-50' : 'border-black/10'}`}>
+                    <span className="text-xl">🎁</span>
+                    <span className="text-[13px] font-semibold text-center px-1">{g.name}</span>
+                    <span className="text-[12px] font-bold text-gold-500">{(g.pricePaise / 100).toLocaleString('en-IN')}</span>
+                  </button>
+                ))}
+              </div>
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a sweet note…" className="input mt-2.5" />
+              {sendErr && <p className="text-[12px] text-rose-500 mt-2">{sendErr}</p>}
+              <button onClick={send} disabled={busy || !pick} className="btn-gold mt-2.5 disabled:opacity-60"><Icon name="gift" size={16} /> {busy ? 'Sending…' : 'Send request'}</button>
+            </>
+          )}
         </div>
       </div>
     </ImmersiveLayout>
   )
 }
 
-/* 49 — Gift received */
+/* 49 — Gift received (demo preview — no live gift-events feed from the backend yet) */
 export function GiftReceived() {
   const nav = useNavigate()
   return (
@@ -181,19 +269,11 @@ export function GiftReceived() {
           <span className="grid place-items-center h-40 w-40 rounded-full bg-white/5 animate-slide-up">
             <span className="grid place-items-center h-24 w-24 rounded-full bg-gold-400 text-white text-4xl">👑</span>
           </span>
-          <h2 className="mt-6 text-[22px] font-extrabold">Neel sent a Crown!</h2>
-          <p className="text-[28px] font-extrabold text-gold-300 mt-1">+2,100 beans</p>
-          <p className="text-[13px] text-white/60 mt-1">≈ ₹ 1,050 added to your balance</p>
+          <h2 className="mt-6 text-[22px] font-extrabold">Gift received!</h2>
+          <p className="text-[13px] text-white/60 mt-1">Check Earnings for the latest gift totals</p>
         </div>
-        <div className="px-4 pb-8 space-y-2">
-          {[['Aman sent Rocket', '+1,050 beans', '🚀'], ['Karan sent Heart', '+120 beans', '❤️']].map(([t, s, e]) => (
-            <div key={t} className="rounded-2xl bg-white/8 border border-white/10 px-3.5 py-3 flex items-center gap-3">
-              <span className="text-xl">{e}</span>
-              <div className="flex-1"><p className="text-[14px] font-semibold">{t}</p><p className="text-[12px] text-gold-300">{s}</p></div>
-              <Avatar name={t} size={30} />
-            </div>
-          ))}
-          <button onClick={() => nav(-1)} className="btn bg-white/10 text-white mt-1"><Icon name="heart" size={16} /> Say thanks</button>
+        <div className="px-4 pb-8">
+          <button onClick={() => nav('/earnings')} className="btn bg-white/10 text-white mt-1"><Icon name="wallet" size={16} /> View earnings</button>
         </div>
       </div>
     </ImmersiveLayout>
@@ -249,9 +329,7 @@ export function SomethingWrong() {
         <span className="grid place-items-center h-28 w-28 rounded-full bg-rose-50 text-rose-500 border-2 border-dashed border-rose-200"><Icon name="alert" size={40} /></span>
         <h2 className="mt-5 text-[22px] font-extrabold text-ink-900">Something went wrong</h2>
         <p className="mt-1.5 text-[13px] text-ink-400">We couldn't load your earnings right now.</p>
-        <div className="w-full max-w-sm mt-4 rounded-xl bg-rose-50 px-3 py-2.5 text-[12px] text-rose-500 flex items-center gap-2 justify-center"><Icon name="alert" size={14} /> Error code E-5031 · our team has been notified.</div>
-        <button className="btn-primary mt-4 max-w-sm"><Icon name="refresh" size={16} /> Try again</button>
-        <button className="btn-outline mt-3 max-w-sm"><Icon name="help" size={16} /> Contact support</button>
+        <button onClick={() => window.location.reload()} className="btn-primary mt-4 max-w-sm"><Icon name="refresh" size={16} /> Try again</button>
       </div>
     </AppLayout>
   )
@@ -295,7 +373,7 @@ export function OfflineState() {
         <span className="grid place-items-center h-10 w-10 rounded-xl bg-black/5 text-ink-400 shrink-0"><Icon name="wifi-off" size={17} /></span>
         <span className="text-[13px] text-ink-500">Calls and live streams are paused while offline.</span>
       </div>
-      <button className="btn-primary"><Icon name="refresh" size={16} /> Retry connection</button>
+      <button onClick={() => window.location.reload()} className="btn-primary"><Icon name="refresh" size={16} /> Retry connection</button>
     </LightState>
   )
 }
@@ -314,7 +392,6 @@ export function Reconnecting() {
           </div>
           <h2 className="mt-6 text-[22px] font-extrabold">Reconnecting…</h2>
           <p className="text-[14px] text-white/60 mt-1">Hang tight, we're restoring the call</p>
-          <span className="pill bg-black/40 text-white text-[13px] mt-4 font-semibold">Billing paused · 00:09</span>
         </div>
         <div className="p-4 pb-8"><button onClick={() => nav('/calls')} className="btn bg-rose-500 text-white"><Icon name="phone-off" size={16} /> End call</button></div>
       </div>
@@ -325,14 +402,15 @@ export function Reconnecting() {
 /* 56 — Session expired */
 export function SessionExpired() {
   const nav = useNavigate()
+  const { logout } = useAuth()
+  const go = async () => { try { await logout() } finally { nav('/login', { replace: true }) } }
   return (
     <LightState icon="lock" iconWrap="bg-gradient-to-br from-brand-50 to-gold-50 text-brand-500" title="Session expired" desc="For your security we signed you out after inactivity.">
       <div className="card p-3.5 flex items-center gap-3 text-left">
         <span className="grid place-items-center h-10 w-10 rounded-xl bg-black/5 text-ink-400 shrink-0"><Icon name="clock" size={17} /></span>
         <span className="text-[13px] text-ink-500">Your earnings and messages are safe. Just sign in again.</span>
       </div>
-      <button onClick={() => nav('/login')} className="btn-primary"><Icon name="chevron-right" size={16} /> Log in again</button>
-      <button className="text-[13px] font-semibold text-brand-600 flex items-center gap-1.5 justify-center w-full"><Icon name="help" size={15} /> Need help?</button>
+      <button onClick={go} className="btn-primary"><Icon name="chevron-right" size={16} /> Log in again</button>
     </LightState>
   )
 }
@@ -345,7 +423,7 @@ export function AccountSuspended() {
       <div className="flex-1 flex flex-col items-center justify-center px-6 py-16 text-center">
         <span className="grid place-items-center h-28 w-28 rounded-full bg-ink-700 text-white"><Icon name="user-x" size={44} /></span>
         <h2 className="mt-5 text-[22px] font-extrabold text-ink-900">Account suspended</h2>
-        <p className="mt-1.5 text-[13px] text-ink-400 max-w-[18rem]">Suspended on 22 Aug for a community guidelines violation.</p>
+        <p className="mt-1.5 text-[13px] text-ink-400 max-w-[18rem]">Your account was suspended for a community guidelines violation.</p>
         <div className="w-full max-w-sm mt-5 rounded-2xl p-4 text-left bg-black/[.03]">
           <p className="text-[13px] font-bold text-ink-900">Access removed</p>
           <p className="text-[12px] text-ink-400 mt-1">Calls, live streams and withdrawals are disabled. There is no login option while a suspension is active.</p>
@@ -359,6 +437,11 @@ export function AccountSuspended() {
 /* screenshot blocked */
 export function ScreenshotBlocked() {
   const nav = useNavigate()
+  const location = useLocation()
+  const { context, contextId } = location.state || {}
+  useEffect(() => {
+    if (context && contextId) moderationApi.logCapture(context, contextId).catch(() => {})
+  }, [context, contextId])
   return (
     <DarkState icon="camera-off" title="Screenshot blocked" desc="Recording and screenshots are disabled during calls and live streams to protect both sides.">
       <span className="mx-auto pill bg-white/10 text-white text-[12px]"><Icon name="shield" size={13} /> This attempt was logged</span>

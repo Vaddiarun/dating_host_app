@@ -1,5 +1,7 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 
+import RequireAuth, { RequireApproved } from './state/RequireAuth.jsx'
+import RealtimeBridge from './state/RealtimeBridge.jsx'
 import { Splash, Login, Otp, ProfileSetup, KycIntro, DocumentUpload, PayoutAccount, UnderReview, Verified, Rejected } from './screens/onboarding.jsx'
 import Home from './screens/home.jsx'
 import { CallsList, IncomingCall, Connecting, ActiveCall, CallSummary } from './screens/calls.jsx'
@@ -15,61 +17,68 @@ import {
 
 export default function App() {
   return (
+    <>
+    <RealtimeBridge />
     <Routes>
       <Route path="/" element={<Navigate to="/splash" replace />} />
       <Route path="/splash" element={<Splash />} />
       <Route path="/login" element={<Login />} />
       <Route path="/otp" element={<Otp />} />
 
-      <Route path="/onboarding/profile" element={<ProfileSetup />} />
-      <Route path="/onboarding/kyc" element={<KycIntro />} />
-      <Route path="/onboarding/documents" element={<DocumentUpload />} />
-      <Route path="/onboarding/payout" element={<PayoutAccount />} />
-      <Route path="/onboarding/review" element={<UnderReview />} />
-      <Route path="/onboarding/verified" element={<Verified />} />
-      <Route path="/onboarding/rejected" element={<Rejected />} />
+      <Route element={<RequireAuth><Outlet /></RequireAuth>}>
+        <Route path="/onboarding/profile" element={<ProfileSetup />} />
+        <Route path="/onboarding/kyc" element={<KycIntro />} />
+        <Route path="/onboarding/documents" element={<DocumentUpload />} />
+        <Route path="/onboarding/payout" element={<PayoutAccount />} />
+        <Route path="/onboarding/review" element={<UnderReview />} />
+        <Route path="/onboarding/verified" element={<Verified />} />
+        <Route path="/onboarding/rejected" element={<Rejected />} />
 
-      <Route path="/home" element={<Home />} />
+        <Route path="/settings" element={<Settings />} />
+        <Route path="/settings/kyc" element={<KycStatus />} />
+        <Route path="/settings/edit-profile" element={<EditProfile />} />
+        <Route path="/settings/rates" element={<RateSettings />} />
+        <Route path="/settings/gallery" element={<Gallery />} />
+        <Route path="/settings/payouts" element={<PayoutDetails />} />
+        <Route path="/settings/payouts/add" element={<PayoutAccount standalone />} />
+        <Route path="/settings/notifications" element={<NotificationSettings />} />
+        <Route path="/settings/help" element={<HelpSupport />} />
 
-      <Route path="/calls" element={<CallsList />} />
-      <Route path="/call/incoming" element={<IncomingCall />} />
-      <Route path="/call/connecting" element={<Connecting />} />
-      <Route path="/call/active" element={<ActiveCall />} />
-      <Route path="/call/summary" element={<CallSummary />} />
+        {/* The real dashboard — locked until KYC is approved, not just "logged in". */}
+        <Route element={<RequireApproved><Outlet /></RequireApproved>}>
+          <Route path="/home" element={<Home />} />
 
-      <Route path="/chat" element={<ChatList />} />
-      <Route path="/chat/:id" element={<ChatConvo />} />
+          <Route path="/calls" element={<CallsList />} />
+          <Route path="/call/incoming" element={<IncomingCall />} />
+          <Route path="/call/connecting" element={<Connecting />} />
+          <Route path="/call/active" element={<ActiveCall />} />
+          <Route path="/call/summary" element={<CallSummary />} />
 
-      <Route path="/live" element={<GoLive />} />
-      <Route path="/live/broadcast" element={<Broadcast />} />
-      <Route path="/live/summary" element={<LiveSummary />} />
+          <Route path="/chat" element={<ChatList />} />
+          <Route path="/chat/:id" element={<ChatConvo />} />
 
-      <Route path="/earnings" element={<Earnings />} />
-      <Route path="/earnings/breakdown" element={<Breakdown />} />
-      <Route path="/earnings/history" element={<EarningsHistory />} />
-      <Route path="/earnings/statement" element={<Statement />} />
+          <Route path="/live" element={<GoLive />} />
+          <Route path="/live/broadcast" element={<Broadcast />} />
+          <Route path="/live/summary" element={<LiveSummary />} />
 
-      <Route path="/withdraw" element={<Withdraw />} />
-      <Route path="/withdraw/confirm" element={<WithdrawConfirm />} />
-      <Route path="/withdraw/status/:state" element={<WithdrawStatus />} />
+          <Route path="/earnings" element={<Earnings />} />
+          <Route path="/earnings/breakdown" element={<Breakdown />} />
+          <Route path="/earnings/history" element={<EarningsHistory />} />
+          <Route path="/earnings/statement" element={<Statement />} />
 
-      <Route path="/settings" element={<Settings />} />
-      <Route path="/settings/kyc" element={<KycStatus />} />
-      <Route path="/settings/edit-profile" element={<EditProfile />} />
-      <Route path="/settings/rates" element={<RateSettings />} />
-      <Route path="/settings/gallery" element={<Gallery />} />
-      <Route path="/settings/payouts" element={<PayoutDetails />} />
-      <Route path="/settings/payouts/add" element={<PayoutAccount standalone />} />
-      <Route path="/settings/notifications" element={<NotificationSettings />} />
-      <Route path="/settings/help" element={<HelpSupport />} />
+          <Route path="/withdraw" element={<Withdraw />} />
+          <Route path="/withdraw/confirm" element={<WithdrawConfirm />} />
+          <Route path="/withdraw/status/:state" element={<WithdrawStatus />} />
 
-      <Route path="/notifications" element={<Notifications />} />
-      <Route path="/report" element={<ReportUser />} />
-      <Route path="/report/submitted" element={<ReportSubmitted />} />
-      <Route path="/block/:name" element={<BlockUser />} />
-      <Route path="/blocked/:name" element={<Blocked />} />
-      <Route path="/gift/ask/:ctx" element={<AskGift />} />
-      <Route path="/gift/received" element={<GiftReceived />} />
+          <Route path="/notifications" element={<Notifications />} />
+          <Route path="/report" element={<ReportUser />} />
+          <Route path="/report/submitted" element={<ReportSubmitted />} />
+          <Route path="/block/:id" element={<BlockUser />} />
+          <Route path="/blocked/:id" element={<Blocked />} />
+          <Route path="/gift/ask/:ctx" element={<AskGift />} />
+          <Route path="/gift/received" element={<GiftReceived />} />
+        </Route>
+      </Route>
 
       <Route path="/state/loading" element={<LoadingState />} />
       <Route path="/state/no-calls" element={<NoCalls />} />
@@ -82,5 +91,6 @@ export default function App() {
 
       <Route path="*" element={<Navigate to="/splash" replace />} />
     </Routes>
+    </>
   )
 }
