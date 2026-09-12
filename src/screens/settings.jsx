@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { TopBar, Avatar, Toggle, Row, IconBadge, ResultScreen, SectionTitle, ErrorCard, ReferenceRow } from '../ui/kit.jsx'
@@ -223,8 +223,10 @@ export function Gallery() {
   const [url, setUrl] = useState('')
   const [mediaType, setMediaType] = useState('photo')
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState('')
   const [addErr, setAddErr] = useState('')
+  const fileRef = useRef(null)
 
   const load = () => { setErr(''); profileApi.listGallery().then((res) => setItems(res.items || [])).catch((e) => setErr(errorMessage(e, 'Could not load your gallery.'))).finally(() => setLoading(false)) }
   useEffect(load, [])
@@ -247,6 +249,22 @@ export function Gallery() {
     }
   }
 
+  const uploadFile = async (file) => {
+    setUploading(true)
+    setErr('')
+    try {
+      const type = file.type.startsWith('video') ? 'video' : 'photo'
+      const { uploadUrl, url: publicUrl } = await profileApi.getGalleryUploadUrl(file.type || 'application/octet-stream')
+      await profileApi.uploadGalleryFile(uploadUrl, file)
+      await profileApi.addGalleryItem(type, publicUrl)
+      await load()
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not upload that file.'))
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const remove = async (id) => {
     setItems((prev) => prev.filter((t) => t.id !== id))
     try { await profileApi.deleteGalleryItem(id) } catch (e) { setErr(errorMessage(e, 'Could not remove that item.')); load() }
@@ -261,6 +279,13 @@ export function Gallery() {
             <button key={c} onClick={() => setF(c)} className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${f === c ? 'bg-brand-600 text-white' : 'bg-black/5 text-ink-400'}`}>{c}</button>
           ))}
         </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*,video/*"
+          hidden
+          onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) uploadFile(file) }}
+        />
         {adding && (
           <div className="card mt-3 p-3.5 space-y-2.5">
             <div className="flex gap-2">
@@ -278,8 +303,8 @@ export function Gallery() {
         )}
         <ErrorCard message={err} onRetry={load} className="mt-4" />
         <div className="grid grid-cols-3 lg:grid-cols-4 gap-2.5 mt-4">
-          <button onClick={() => setAdding(true)} className="aspect-square rounded-2xl border-2 border-dashed border-brand-300 bg-brand-50/60 grid place-items-center text-brand-500">
-            <Icon name="plus" size={22} />
+          <button onClick={() => fileRef.current?.click()} disabled={uploading} className="aspect-square rounded-2xl border-2 border-dashed border-brand-300 bg-brand-50/60 grid place-items-center text-brand-500 disabled:opacity-60">
+            {uploading ? <Icon name="refresh" size={20} className="animate-spinslow" /> : <Icon name="plus" size={22} />}
           </button>
           {!loading && filtered.map((t) => (
             <button key={t.id} onClick={() => remove(t.id)} className="relative aspect-square rounded-2xl overflow-hidden bg-gradient-to-br from-brand-300/60 to-gold-300/50 grid place-items-center group">
@@ -295,6 +320,7 @@ export function Gallery() {
         <div className="mt-4 flex items-start gap-2 rounded-xl bg-gold-50 px-3 py-2.5 text-[12px] text-gold-600">
           <Icon name="shield" size={14} className="mt-0.5 shrink-0" /> All uploads are reviewed. Nudity or off-platform contact will be removed.
         </div>
+        {!adding && <button onClick={() => setAdding(true)} className="mt-3 text-[12px] font-semibold text-brand-600">or add by URL instead</button>}
       </div>
     </AppLayout>
   )

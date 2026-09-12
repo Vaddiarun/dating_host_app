@@ -173,18 +173,43 @@ export function EarningsHistory() {
 }
 
 /* 28 — Statement */
+// yyyy-mm-dd in local time (not toISOString, which shifts to UTC and can land on the wrong day)
+const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
 export function Statement() {
+  const today = new Date()
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+  const [from, setFrom] = useState(isoDate(monthStart))
+  const [to, setTo] = useState(isoDate(today))
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const download = async () => {
+    setBusy(true)
+    setErr('')
+    try {
+      await earningsApi.downloadStatement(from, to)
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not generate your statement.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <AppLayout tab="/earnings" title="Statement" back bottomNav={false} maxW="md" bg="canvas">
       <TopBar title="Statement" />
       <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
         <div className="card p-4 flex items-center gap-3">
           <IconBadge name="file-text" tone="brand" />
-          <div><p className="text-[15px] font-semibold text-ink-900">Monthly statement</p><p className="text-[12px] text-ink-400">Generated from your earnings history</p></div>
+          <div><p className="text-[15px] font-semibold text-ink-900">Earnings statement</p><p className="text-[12px] text-ink-400">Exported as a CSV file</p></div>
         </div>
-        <div className="mt-4 rounded-xl bg-brand-50 px-3.5 py-3 text-[12px] text-brand-700 flex items-start gap-2">
-          <Icon name="alert" size={14} className="mt-0.5 shrink-0" /> Statement export isn't available from the backend yet — use Earnings → Breakdown and History for now.
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <div><span className="label">From</span><input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} max={to} /></div>
+          <div><span className="label">To</span><input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} min={from} max={isoDate(today)} /></div>
         </div>
+        <ErrorCard message={err} onRetry={download} compact className="mt-3" />
+        <button onClick={download} disabled={busy} className="btn-primary mt-4 disabled:opacity-60"><Icon name="download" size={16} /> {busy ? 'Preparing…' : 'Download CSV'}</button>
       </div>
     </AppLayout>
   )

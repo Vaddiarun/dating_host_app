@@ -8,6 +8,7 @@ import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.j
 import { useAuth } from '../state/AuthContext.jsx'
 import { ErrorCard } from '../ui/kit.jsx'
 import { errorMessage } from '../lib/errors.js'
+import { onSocketEvent } from '../lib/socket.js'
 
 /* 22 — Go live setup */
 export function GoLive() {
@@ -116,8 +117,29 @@ export function Broadcast() {
   const [mic, setMic] = useState(micOn)
   const [rtcErr, setRtcErr] = useState('')
   const [flipping, setFlipping] = useState(false)
+  const [viewerCount, setViewerCount] = useState(0)
   const videoContainerRef = useRef(null)
   const sessionRef = useRef(null)
+
+  // Viewers' chat messages arrive here now that the host is actually joined to the
+  // broadcast's socket room (previously only viewers were — host got nothing).
+  useEffect(() => {
+    if (!broadcastId) return
+    return onSocketEvent('live:chat', (msg) => {
+      if (msg?.broadcastId && msg.broadcastId !== broadcastId) return
+      setChat((c) => [...c, { n: msg.senderName || 'Viewer', t: msg.content }])
+    })
+  }, [broadcastId])
+
+  // No push event for viewer count yet — poll the broadcast for the live figure.
+  useEffect(() => {
+    if (!broadcastId) return
+    let cancelled = false
+    const tick = () => liveApi.get(broadcastId).then((b) => !cancelled && setViewerCount(b.viewerCount ?? 0)).catch(() => {})
+    tick()
+    const t = setInterval(tick, 8000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [broadcastId])
 
   useEffect(() => {
     if (!channelName || !agoraToken) { setRtcErr('No stream credentials — rejoin from Go live.'); return }
@@ -178,6 +200,7 @@ export function Broadcast() {
         <StatusBar dark />
         <div className="px-4 flex items-center gap-2">
           <span className="pill bg-black/40 text-white text-[12px]"><Avatar name="You" size={22} /> You <span className="text-rose-400 font-bold">● LIVE</span></span>
+          <span className="pill bg-black/40 text-white text-[12px]"><Icon name="eye" size={12} /> {viewerCount}</span>
           <button onClick={flipCamera} disabled={flipping} className="ml-auto h-9 w-9 grid place-items-center rounded-full bg-black/40 text-white disabled:opacity-50"><Icon name="flip" size={16} /></button>
         </div>
         <div className="flex-1 relative">

@@ -100,6 +100,7 @@ export function IncomingCall() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const rate = sp.get('rate')
+  const callerName = sp.get('callerName') || 'Caller'
 
   const accept = async () => {
     if (!callId) { nav('/call/connecting'); return }
@@ -107,7 +108,7 @@ export function IncomingCall() {
     setErr('')
     try {
       const res = await callsApi.accept(callId)
-      nav(`/call/connecting?callId=${callId}`, { state: { channelName: res.channelName, agoraToken: res.agoraToken } })
+      nav(`/call/connecting?callId=${callId}`, { state: { channelName: res.channelName, agoraToken: res.agoraToken, callerName: res.callerName || callerName } })
     } catch (e) {
       setErr(errorMessage(e, 'Could not accept this call.'))
     } finally {
@@ -120,9 +121,9 @@ export function IncomingCall() {
       <div className="flex-1 flex flex-col items-center pt-16 px-6">
         <div className="relative">
           <span className="absolute inset-0 rounded-full bg-brand-400/40 animate-pulse-ring" />
-          <Avatar name="Caller" size={150} className="ring-4 ring-white/20" />
+          <Avatar name={callerName} size={150} className="ring-4 ring-white/20" />
         </div>
-        <div className="mt-6 flex items-center gap-2"><h2 className="text-[28px] font-extrabold">Caller</h2></div>
+        <div className="mt-6 flex items-center gap-2"><h2 className="text-[28px] font-extrabold">{callerName}</h2></div>
         <p className="text-[14px] text-white/70 mt-1">Incoming video call</p>
         {rate && <span className="pill bg-white/10 text-white text-[13px] mt-4">Earn {rupees(Number(rate))} / min</span>}
         {err && <p className="text-[13px] text-rose-300 mt-4 px-6 text-center">{err}</p>}
@@ -147,6 +148,7 @@ export function Connecting() {
   const [sp] = useSearchParams()
   const location = useLocation()
   const callId = sp.get('callId')
+  const callerName = location.state?.callerName || 'Caller'
   useEffect(() => {
     const t = setTimeout(() => nav(callId ? `/call/active?callId=${callId}` : '/call/active', { state: location.state }), 1800)
     return () => clearTimeout(t)
@@ -154,7 +156,7 @@ export function Connecting() {
   return (
     <CallStage>
       <div className="flex-1 flex flex-col items-center justify-center px-6">
-        <Avatar name="Caller" size={150} className="ring-4 ring-white/15" />
+        <Avatar name={callerName} size={150} className="ring-4 ring-white/15" />
         <h2 className="mt-7 text-[24px] font-extrabold">Connecting…</h2>
         <p className="text-[14px] text-white/60 mt-1">Securing an encrypted line</p>
         <span className="pill bg-white/10 text-white text-[12px] mt-4"><Icon name="lock" size={13} /> End-to-end encrypted</span>
@@ -173,7 +175,7 @@ export function ActiveCall() {
   const location = useLocation()
   const { me } = useAuth()
   const callId = sp.get('callId')
-  const { channelName, agoraToken } = location.state || {}
+  const { channelName, agoraToken, callerName: navCallerName } = location.state || {}
   const [muted, setMuted] = useState(false)
   const [cam, setCam] = useState(true)
   const [call, setCall] = useState(null)
@@ -241,6 +243,7 @@ export function ActiveCall() {
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
   const ss = String(elapsed % 60).padStart(2, '0')
+  const callerName = call?.callerName || navCallerName || 'Caller'
   const ratePaise = call?.ratePerMinutePaiseSnapshot ?? 0
   const estBeans = Math.round((ratePaise * elapsed) / 60)
 
@@ -263,8 +266,8 @@ export function ActiveCall() {
         <StatusBar dark />
         <div className="px-4 space-y-2">
           <div className="rounded-2xl bg-white/8 backdrop-blur px-3.5 py-2.5 flex items-center gap-3 border border-white/10">
-            <Avatar name="Caller" size={38} />
-            <div className="flex-1"><p className="text-[15px] font-semibold">Caller</p><p className="text-[12px] text-white/60">{mm}:{ss} · HD</p></div>
+            <Avatar name={callerName} size={38} />
+            <div className="flex-1"><p className="text-[15px] font-semibold">{callerName}</p><p className="text-[12px] text-white/60">{mm}:{ss} · HD</p></div>
             <span className="text-[13px] font-bold text-gold-300">{estBeans} Beans</span>
           </div>
           {callErr && <p className="text-[12px] text-rose-300 px-1">{callErr}</p>}
@@ -321,13 +324,14 @@ export function CallSummary() {
   const durationSec = call?.startedAt && call?.endedAt ? Math.round((new Date(call.endedAt) - new Date(call.startedAt)) / 1000) : 0
   const mins = Math.floor(durationSec / 60)
   const secs = durationSec % 60
+  const callerName = call?.callerName || 'Caller'
 
   return (
     <AppLayout tab="/calls" title="Call ended" maxW="md" bg="white">
       <PlainHeader title="Call ended" />
       <div className="px-5 lg:px-0 pt-8 lg:pt-2 pb-4 flex flex-col items-center">
-        <Avatar name="Caller" size={92} className="ring-4 ring-brand-500/30" />
-        <h2 className="mt-3 text-[22px] font-extrabold text-ink-900">Caller</h2>
+        <Avatar name={callerName} size={92} className="ring-4 ring-brand-500/30" />
+        <h2 className="mt-3 text-[22px] font-extrabold text-ink-900">{callerName}</h2>
         <p className="text-[13px] text-ink-400">{call?.type === 'voice' ? 'Voice call' : 'Video call'}{durationSec ? ` · ${mins} min ${secs} sec` : ''}</p>
         <ErrorCard message={err} onRetry={load} compact className="w-full mt-3" />
         <div className="card w-full mt-5 p-4">
@@ -344,7 +348,7 @@ export function CallSummary() {
         </div>
         <div className="w-full mt-4 space-y-3">
           <button onClick={() => nav('/home')} className="btn-primary">Back to home</button>
-          <button onClick={() => nav('/report', { state: { targetId: call?.userId, targetName: 'Caller' } })} className="btn-danger-outline"><Icon name="flag" size={16} /> Report this user</button>
+          <button onClick={() => nav('/report', { state: { targetId: call?.userId, targetName: callerName } })} className="btn-danger-outline"><Icon name="flag" size={16} /> Report this user</button>
         </div>
       </div>
     </AppLayout>

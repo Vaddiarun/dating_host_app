@@ -1,4 +1,11 @@
-import { apiFetch, uploadToPresignedUrl, getTokens, setTokens, clearTokens } from './client.js'
+import { apiFetch, apiDownload, uploadToPresignedUrl, getTokens, setTokens, clearTokens } from './client.js'
+
+/** Platform-wide, rarely-changing settings (currently just the bean↔paise rate — it's
+ * admin-configurable and time-versioned server-side, so read it here rather than inferring
+ * it from a balance snapshot). */
+export const config = {
+  get: () => apiFetch('/config'),
+}
 
 export const auth = {
   requestOtp: (phone) => apiFetch('/auth/otp/request', { method: 'POST', auth: false, body: { phone } }),
@@ -36,6 +43,10 @@ export const profile = {
   listGallery: () => apiFetch('/me/host-profile/gallery'),
   addGalleryItem: (mediaType, url) => apiFetch('/me/host-profile/gallery', { method: 'POST', body: { mediaType, url } }),
   deleteGalleryItem: (id) => apiFetch(`/me/host-profile/gallery/${id}`, { method: 'DELETE' }),
+  // Gallery media is public (unlike KYC docs) — the response's `url` is the final public
+  // URL to hand straight to addGalleryItem, no need to construct it from the key ourselves.
+  getGalleryUploadUrl: (contentType) => apiFetch('/me/host-profile/gallery/upload-url', { method: 'POST', body: { contentType } }),
+  uploadGalleryFile: (uploadUrl, file) => uploadToPresignedUrl(uploadUrl, file),
 
   listPayoutMethods: () => apiFetch('/me/payout-methods'),
   addPayoutMethod: (data) => apiFetch('/me/payout-methods', { method: 'POST', body: data }),
@@ -71,6 +82,7 @@ export const gifts = {
 export const live = {
   adultModeStatus: () => apiFetch('/live/adult-mode'),
   start: (title) => apiFetch('/live/broadcasts', { method: 'POST', body: { title } }),
+  get: (id) => apiFetch(`/live/broadcasts/${id}`),
   sendChat: (id, content) => apiFetch(`/live/broadcasts/${id}/chat`, { method: 'POST', body: { content } }),
   end: (id) => apiFetch(`/live/broadcasts/${id}/end`, { method: 'POST' }),
 }
@@ -86,6 +98,13 @@ export const earnings = {
   summary: () => apiFetch('/me/earnings'),
   breakdown: (from, to) => apiFetch('/me/earnings/breakdown', { query: { from, to } }),
   history: (type = 'all', page = 1, pageSize = 20) => apiFetch('/me/history', { query: { type, page, pageSize } }),
+  downloadStatement: (from, to) => apiDownload('/me/earnings/statement', { query: { from, to }, filename: `statement-${from || 'current'}.csv` }),
+}
+
+export const notifications = {
+  list: (page = 1, pageSize = 20) => apiFetch('/me/notifications', { query: { page, pageSize } }),
+  markRead: (id) => apiFetch(`/me/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllRead: () => apiFetch('/me/notifications/read-all', { method: 'PATCH' }),
 }
 
 export const moderation = {

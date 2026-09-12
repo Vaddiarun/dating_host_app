@@ -52,6 +52,17 @@ async function refreshAccessToken() {
   return refreshPromise
 }
 
+function buildUrl(path, query) {
+  let url = `${BASE_URL}${path}`
+  if (query && Object.keys(query).length) {
+    const qs = new URLSearchParams(
+      Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+    ).toString()
+    if (qs) url += `?${qs}`
+  }
+  return url
+}
+
 /**
  * Core fetch wrapper: injects the base URL + bearer token, retries once on a
  * 401 by refreshing the access token, and throws ApiError with the server's
@@ -65,13 +76,7 @@ export async function apiFetch(path, { method = 'GET', body, auth = true, query,
     if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
   }
 
-  let url = `${BASE_URL}${path}`
-  if (query && Object.keys(query).length) {
-    const qs = new URLSearchParams(
-      Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== ''),
-    ).toString()
-    if (qs) url += `?${qs}`
-  }
+  const url = buildUrl(path, query)
 
   const res = await fetch(url, {
     method,
@@ -96,6 +101,44 @@ export async function apiFetch(path, { method = 'GET', body, auth = true, query,
     throw new ApiError(data?.error || res.statusText || 'Request failed', res.status, data)
   }
   return data
+}
+
+/**
+ * Fetches a file response (CSV/PDF export, not JSON) and hands it to the browser as a save —
+ * same 401-refresh-and-retry-once shape as apiFetch, since this hits an authed endpoint too.
+ */
+export async function apiDownload(path, { query, filename } = {}, retry = true) {
+  const { accessToken } = getTokens()
+  const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
+  const res = await fetch(buildUrl(path, query), { headers })
+
+  if (res.status === 401 && retry) {
+    try {
+      await refreshAccessToken()
+    } catch {
+      clearTokens()
+      throw new ApiError('Session expired', 401)
+    }
+    return apiDownload(path, { query, filename }, false)
+  }
+
+  if (!res.ok) {
+    let body = null
+    try { body = await res.json() } catch { /* not JSON — a plain error page or empty body */ }
+    throw new ApiError(body?.error || res.statusText || 'Download failed', res.status, body)
+  }
+
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') || ''
+  const name = filename || /filename="?([^";]+)"?/.exec(disposition)?.[1] || 'download'
+  const objectUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = objectUrl
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 4000)
 }
 
 /** Uploads a file straight to the presigned S3 URL returned by /me/kyc/upload-url. No auth header. */

@@ -3,7 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { PlainHeader, ResultScreen, KV, IconBadge, ErrorCard } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
-import { withdrawals as withdrawalsApi, earnings as earningsApi, profile as profileApi } from '../api/index.js'
+import { withdrawals as withdrawalsApi, earnings as earningsApi, profile as profileApi, config as configApi } from '../api/index.js'
 import { rupees, rupeesRaw } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
 
@@ -12,6 +12,7 @@ export function Withdraw() {
   const nav = useNavigate()
   const [summary, setSummary] = useState(null)
   const [primary, setPrimary] = useState(null)
+  const [paisePerBean, setPaisePerBean] = useState(1)
   const [amt, setAmt] = useState('')
   const [err, setErr] = useState('')
   const [loadErr, setLoadErr] = useState('')
@@ -20,6 +21,9 @@ export function Withdraw() {
     setLoadErr('')
     earningsApi.summary().then((s) => { setSummary(s); setAmt(String(rupeesRaw(s.availableBalancePaise))) }).catch((e) => setLoadErr(errorMessage(e, 'Could not load your balance.')))
     profileApi.listPayoutMethods().then((res) => setPrimary((res.methods || []).find((m) => m.isPrimary) || res.methods?.[0] || null)).catch((e) => setLoadErr(errorMessage(e, 'Could not load your payout methods.')))
+    // The bean↔paise rate is admin-configurable and can move — always read it from /config
+    // rather than inferring it from a balance snapshot. 1:1 is just the safe pre-load default.
+    configApi.get().then((c) => { if (c?.paisePerBean) setPaisePerBean(c.paisePerBean) }).catch(() => {})
   }
   useEffect(load, [])
 
@@ -28,9 +32,6 @@ export function Withdraw() {
   const amountRupees = Number(amt.replace(/[^\d]/g, '')) || 0
   const tooLow = amountRupees > 0 && amountRupees < 10
   const tooHigh = amountRupees > availableRupees
-  // Beans and paise track 1:1 on every response we've seen, but the backend calls it a
-  // "snapshot" per-transaction, so derive it from the live balance rather than hardcoding it.
-  const paisePerBean = summary?.beanBalance ? availablePaise / summary.beanBalance : 1
 
   const go = () => {
     if (amountRupees < 10) { setErr('Minimum withdrawal is ₹ 10'); return }

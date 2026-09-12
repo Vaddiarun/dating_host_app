@@ -3,39 +3,100 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { StatusBar, PlainHeader, TopBar, Avatar, Segmented, IconBadge, ResultScreen, SectionTitle, ErrorCard } from '../ui/kit.jsx'
 import { AppLayout, ImmersiveLayout, CenterLayout } from '../ui/layouts.jsx'
-import { notifications, reportReasons } from '../data.js'
-import { moderation as moderationApi, gifts as giftsApi } from '../api/index.js'
+import { reportReasons } from '../data.js'
+import { moderation as moderationApi, gifts as giftsApi, notifications as notificationsApi } from '../api/index.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { errorMessage } from '../lib/errors.js'
+import { dayLabel, clockTime } from '../lib/format.js'
+import { onSocketEvent } from '../lib/socket.js'
 
 /* 44 — Notifications */
+// v1 notification types from the backend: gift, withdrawal_status, missed_call. Rendered
+// generically (title/message from the payload) so any type added later still shows something.
+const NOTIF_GROUP = { gift: 'Money', withdrawal_status: 'Money', missed_call: 'Calls' }
+const NOTIF_ICON = { gift: 'gift', withdrawal_status: 'wallet', missed_call: 'phone' }
+const NOTIF_TONE = { gift: 'gold', withdrawal_status: 'brand', missed_call: 'rose' }
+const notifId = (n) => n.id ?? n._id
+const notifRead = (n) => n.isRead ?? n.read ?? false
+const notifTitle = (n) => n.title || n.message || { gift: 'You received a gift', withdrawal_status: 'Withdrawal status changed', missed_call: 'You missed a call' }[n.type] || 'Notification'
+const notifSub = (n) => n.sub || n.subtitle || n.body || ''
+
 export function Notifications() {
   const [f, setF] = useState('All')
+  const [items, setItems] = useState([])
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+
+  const load = (p = 1) => {
+    if (p === 1) setLoading(true)
+    setErr('')
+    notificationsApi.list(p, 20)
+      .then((res) => {
+        const list = res.items || res.notifications || res.results || []
+        setItems((prev) => (p === 1 ? list : [...prev, ...list]))
+        setHasMore(list.length >= 20)
+        setPage(p)
+      })
+      .catch((e) => setErr(errorMessage(e, 'Could not load your notifications.')))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => load(1), []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => onSocketEvent('notification:new', (n) => setItems((prev) => [n, ...prev])), [])
+
+  const markRead = (n) => {
+    if (notifRead(n)) return
+    setItems((prev) => prev.map((it) => (it === n ? { ...it, isRead: true, read: true } : it)))
+    notificationsApi.markRead(notifId(n)).catch(() => {})
+  }
+
+  const markAllRead = () => {
+    setItems((prev) => prev.map((it) => ({ ...it, isRead: true, read: true })))
+    notificationsApi.markAllRead().catch(() => {})
+  }
+
+  const unreadCount = items.filter((n) => !notifRead(n)).length
+  const filtered = items.filter((n) => f === 'All' || (NOTIF_GROUP[n.type] || 'System') === f)
+  const groups = filtered.reduce((acc, n) => { (acc[dayLabel(n.createdAt) || 'Earlier'] ||= []).push(n); return acc }, {})
+
   return (
     <AppLayout tab="/notifications" title="Notifications" back bottomNav={false} maxW="lg" bg="canvas">
-      <TopBar title="Notifications" />
+      <TopBar title="Notifications" sub={unreadCount ? `${unreadCount} unread` : undefined} right={unreadCount > 0 && (
+        <button onClick={markAllRead} className="text-[12px] font-semibold text-brand-600">Mark all read</button>
+      )} />
       <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-6">
-        <Segmented options={['All', 'Money', 'Calls', 'System']} value={f} onChange={setF} />
-        {notifications.map((g) => (
-          <div key={g.group}>
-            <SectionTitle className="mt-5 mb-1">{g.group}</SectionTitle>
+        <div className="flex items-center gap-3">
+          <Segmented options={['All', 'Money', 'Calls', 'System']} value={f} onChange={setF} />
+          <button onClick={markAllRead} className="hidden lg:block ml-auto shrink-0 text-[12px] font-semibold text-brand-600">Mark all read</button>
+        </div>
+        {loading && <p className="text-[13px] text-ink-400 mt-6 text-center">Loading…</p>}
+        {!loading && err && <ErrorCard message={err} onRetry={() => load(1)} className="mt-6" />}
+        {!loading && !err && filtered.length === 0 && <p className="text-[13px] text-ink-400 mt-6 text-center">Nothing here yet.</p>}
+        {!err && Object.entries(groups).map(([day, list]) => (
+          <div key={day}>
+            <SectionTitle className="mt-5 mb-1">{day}</SectionTitle>
             <div className="card px-4 divide-y divide-black/5">
-              {g.items.map((it, i) => (
-                <div key={i} className="flex items-center gap-3 py-3">
-                  {it.avatar ? <Avatar name={it.avatar} size={40} /> : <IconBadge name={it.icon} tone={it.tone} />}
-                  <div className="flex-1 min-w-0"><p className="text-[14px] font-semibold text-ink-900">{it.title}</p>{it.sub && <p className="text-[12px] text-ink-400 truncate">{it.sub}</p>}</div>
-                  <div className="text-right shrink-0">
-                    <p className="text-[11px] text-ink-300">{it.time}</p>
-                    {it.tag && <span className={`pill text-[10px] mt-1 ${it.tagTone === 'rose' ? 'bg-rose-50 text-rose-500' : 'bg-brand-50 text-brand-600'}`}>{it.tag}</span>}
+              {list.map((it, i) => (
+                <button key={notifId(it) ?? i} onClick={() => markRead(it)} className="w-full flex items-center gap-3 py-3 text-left">
+                  <IconBadge name={NOTIF_ICON[it.type] || 'bell'} tone={NOTIF_TONE[it.type] || 'brand'} />
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-[14px] ${notifRead(it) ? 'font-medium text-ink-700' : 'font-semibold text-ink-900'}`}>{notifTitle(it)}</p>
+                    {notifSub(it) && <p className="text-[12px] text-ink-400 truncate">{notifSub(it)}</p>}
                   </div>
-                </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-[11px] text-ink-300">{clockTime(it.createdAt)}</p>
+                    {!notifRead(it) && <span className="mt-1 inline-block h-2 w-2 rounded-full bg-brand-600" />}
+                  </div>
+                </button>
               ))}
             </div>
           </div>
         ))}
-        <div className="mt-5 rounded-xl bg-brand-50 px-3 py-2.5 text-[12px] text-brand-700 flex items-start gap-2">
-          <Icon name="alert" size={14} className="mt-0.5 shrink-0" /> Sample notifications — the backend doesn't expose a notifications feed yet.
-        </div>
+        {!loading && !err && hasMore && (
+          <button onClick={() => load(page + 1)} className="btn-outline mt-4 text-[13px]">Load more</button>
+        )}
       </div>
     </AppLayout>
   )
