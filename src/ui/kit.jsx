@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useNavigate, NavLink, useLocation } from 'react-router-dom'
 import Icon from './Icon.jsx'
 import { me } from '../data.js'
@@ -212,6 +213,32 @@ export function ResultScreen({ tone = 'green', icon = 'check', title, desc, chil
       <h2 className="mt-6 text-[24px] font-extrabold text-ink-900">{title}</h2>
       {desc && <p className="mt-1.5 text-[14px] text-ink-400 max-w-[18rem]">{desc}</p>}
       <div className="w-full max-w-sm mt-6 space-y-3">{children}</div>
+    </div>
+  )
+}
+
+/** A copyable reference/tracking number, e.g. on a pending-review or request-status screen. */
+export function ReferenceRow({ value, label = 'Reference ID', className = '' }) {
+  const [copied, setCopied] = useState(false)
+  if (!value) return null
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // clipboard API unavailable (older browser, no permission) — nothing to fall back to safely
+    }
+  }
+  return (
+    <div className={`flex items-center justify-between gap-3 rounded-xl bg-black/[.04] px-3.5 py-2.5 ${className}`}>
+      <div className="min-w-0">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">{label}</p>
+        <p className="text-[13px] font-mono font-semibold text-ink-900 truncate">{value}</p>
+      </div>
+      <button onClick={copy} className="shrink-0 flex items-center gap-1.5 rounded-lg bg-white border border-black/10 px-2.5 py-1.5 text-[12px] font-semibold text-ink-600 active:scale-95">
+        <Icon name={copied ? 'check' : 'copy'} size={13} className={copied ? 'text-emerald-500' : ''} /> {copied ? 'Copied' : 'Copy'}
+      </button>
     </div>
   )
 }

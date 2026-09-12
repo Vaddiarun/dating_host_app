@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
-import { TopBar, Avatar, Toggle, Row, IconBadge, ResultScreen, SectionTitle, ErrorCard } from '../ui/kit.jsx'
+import { TopBar, Avatar, Toggle, Row, IconBadge, ResultScreen, SectionTitle, ErrorCard, ReferenceRow } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { useAuth } from '../state/AuthContext.jsx'
 import { profile as profileApi } from '../api/index.js'
-import { rupees } from '../lib/format.js'
+import { rupees, referenceCode } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
 
 /* 39 / 40 — Settings + Profile */
@@ -78,6 +78,7 @@ export function Settings() {
 
 /* 40 — KYC status */
 export function KycStatus() {
+  const { me } = useAuth()
   const [kyc, setKyc] = useState(null)
   const [err, setErr] = useState('')
   const load = () => { setErr(''); profileApi.getKycStatus().then(setKyc).catch((e) => setErr(errorMessage(e, 'Could not load your KYC status.'))) }
@@ -85,6 +86,7 @@ export function KycStatus() {
   const status = kyc?.kycStatus || 'not_submitted'
   const tone = status === 'approved' ? 'brand' : status === 'rejected' ? 'rose' : 'gold'
   const pillTone = status === 'approved' ? 'bg-emerald-50 text-emerald-600' : status === 'rejected' ? 'bg-rose-50 text-rose-500' : 'bg-gold-50 text-gold-600'
+  const ref = referenceCode(kyc, me?.id)
   return (
     <AppLayout tab="/settings" title="KYC status" back bottomNav={false} maxW="md" bg="white">
       <TopBar title="KYC status" />
@@ -92,6 +94,7 @@ export function KycStatus() {
         <ErrorCard message={err} onRetry={load} className="mx-5" />
         <ResultScreen tone={tone} icon="shield-check" title={status === 'approved' ? 'Identity verified' : status === 'rejected' ? 'Verification rejected' : status === 'pending' ? 'Under review' : 'Not submitted'}>
           <span className={`mx-auto pill ${pillTone} text-[12px] -mt-3 capitalize`}><span className="h-1.5 w-1.5 rounded-full bg-current" /> {status.replace('_', ' ')}</span>
+          {status !== 'not_submitted' && <ReferenceRow value={ref} label="Application ID" />}
           {kyc?.rejectionReason && <p className="text-[13px] text-rose-500 text-center">{kyc.rejectionReason}</p>}
           <div className="card p-4 text-left mt-2">
             {(kyc?.documents || []).length === 0 && <p className="text-[13px] text-ink-400 py-2">No documents submitted yet.</p>}

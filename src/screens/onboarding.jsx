@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
-import { StatusBar, TopBar, PlainHeader, IconBadge, ResultScreen, SectionTitle, ErrorCard } from '../ui/kit.jsx'
+import { StatusBar, TopBar, PlainHeader, IconBadge, ResultScreen, SectionTitle, ErrorCard, ReferenceRow } from '../ui/kit.jsx'
 import { CenterLayout, ImmersiveLayout, AppLayout } from '../ui/layouts.jsx'
 import { useAuth, resolveEntryRoute } from '../state/AuthContext.jsx'
 import { profile as profileApi } from '../api/index.js'
 import { errorMessage } from '../lib/errors.js'
+import { referenceCode } from '../lib/format.js'
 
 /* 1 — Splash */
 export function Splash() {
@@ -625,10 +626,11 @@ export function PayoutAccount({ standalone }) {
 /* 8 — Under review */
 export function UnderReview() {
   const nav = useNavigate()
-  const { refreshMe } = useAuth()
+  const { me, refreshMe } = useAuth()
   const [checking, setChecking] = useState(false)
   const [kyc, setKyc] = useState(null)
   const [err, setErr] = useState('')
+  const ref = referenceCode(kyc, me?.id)
 
   const check = async () => {
     setChecking(true)
@@ -660,7 +662,8 @@ export function UnderReview() {
         <span className="grid place-items-center h-20 w-20 rounded-full bg-gold-400 text-white shadow-[0_0_0_10px_rgba(224,169,46,.16),0_0_0_20px_rgba(224,169,46,.08)]"><Icon name="clock" size={34} /></span>
         <h2 className="mt-6 text-[24px] font-extrabold text-ink-900">Under review</h2>
         <p className="mt-1 text-[13px] text-ink-400">Usually approved within 24 hours.</p>
-        <div className="card w-full max-w-sm mt-6 p-4 divide-y divide-black/5">
+        <ReferenceRow value={ref} label="Application ID" className="w-full max-w-sm mt-4" />
+        <div className="card w-full max-w-sm mt-4 p-4 divide-y divide-black/5">
           {rows.map((r) => (
             <div key={r.t} className="flex items-center gap-3 py-3">
               <span className={`h-6 w-6 grid place-items-center rounded-full ${r.done ? 'bg-emerald-500' : 'bg-gold-400'} text-white`}><Icon name={r.done ? 'check' : 'clock'} size={13} /></span>

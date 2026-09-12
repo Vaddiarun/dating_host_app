@@ -34,6 +34,17 @@ export function clockTime(iso) {
   return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
+/**
+ * Best-effort tracking number for a record. Backends spell the id field
+ * differently (`id`, `_id`, `kycId`, `referenceId`, ...), and a "my KYC"
+ * endpoint may not carry one of its own at all — in which case the account
+ * id doubles as the thing support can look the submission up by.
+ */
+export function referenceCode(obj, fallbackId) {
+  const raw = obj?.id ?? obj?._id ?? obj?.kycId ?? obj?.referenceId ?? obj?.reference ?? obj?.applicationId ?? obj?.submissionId ?? fallbackId
+  return raw ? String(raw) : ''
+}
+
 export function dayLabel(iso) {
   if (!iso) return ''
   const d = new Date(iso)
