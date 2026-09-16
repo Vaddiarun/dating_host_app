@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate, NavLink, useLocation } from 'react-router-dom'
 import Icon from './Icon.jsx'
 import { me } from '../data.js'
+import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 
 /* ============ Phone status bar (mobile only) ============ */
 export function StatusBar({ dark = false }) {
@@ -79,6 +80,7 @@ export function BottomNav() {
 /* ============ Desktop sidebar ============ */
 export function SideNav() {
   const nav = useNavigate()
+  const { unreadCount } = useNotificationsCount()
   return (
     <aside className="hidden lg:flex w-[248px] shrink-0 flex-col border-r border-black/5 bg-white">
       <div className="flex items-center gap-2.5 px-5 h-16 border-b border-black/5">
@@ -96,7 +98,7 @@ export function SideNav() {
         <div className="pt-3 mt-3 border-t border-black/5 space-y-1">
           <NavLink to="/notifications" className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold ${isActive ? 'bg-brand-50 text-brand-700' : 'text-ink-500 hover:bg-black/[.03]'}`}>
             <Icon name="bell" size={19} /> <span className="flex-1">Notifications</span>
-            <span className="h-5 min-w-5 px-1 grid place-items-center rounded-full bg-brand-600 text-white text-[11px]">4</span>
+            {unreadCount > 0 && <span className="h-5 min-w-5 px-1 grid place-items-center rounded-full bg-brand-600 text-white text-[11px]">{unreadCount}</span>}
           </NavLink>
           <NavLink to="/settings" className={({ isActive }) => `flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold ${isActive ? 'bg-brand-50 text-brand-700' : 'text-ink-500 hover:bg-black/[.03]'}`}>
             <Icon name="settings" size={19} /> <span className="flex-1">Settings</span>
@@ -117,6 +119,7 @@ export function SideNav() {
 /* ============ Desktop top bar ============ */
 export function DesktopTopBar({ title, back }) {
   const nav = useNavigate()
+  const { unreadCount } = useNotificationsCount()
   return (
     <header className="hidden lg:flex h-16 shrink-0 items-center gap-3 border-b border-black/5 bg-white px-8">
       {back && (
@@ -128,7 +131,7 @@ export function DesktopTopBar({ title, back }) {
       <div className="ml-auto flex items-center gap-2">
         <button onClick={() => nav('/notifications')} className="relative h-9 w-9 grid place-items-center rounded-xl border border-black/10 text-ink-600 hover:bg-black/[.03]">
           <Icon name="bell" size={18} />
-          <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 grid place-items-center rounded-full bg-brand-600 text-white text-[10px]">4</span>
+          {unreadCount > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 grid place-items-center rounded-full bg-brand-600 text-white text-[10px]">{unreadCount}</span>}
         </button>
         <button onClick={() => nav('/earnings')} className="h-9 w-9 grid place-items-center rounded-xl border border-black/10 text-ink-600 hover:bg-black/[.03]"><Icon name="wallet" size={18} /></button>
         <Avatar name={me.name} size={34} />

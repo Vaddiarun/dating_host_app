@@ -6,9 +6,10 @@ import { AppLayout, ImmersiveLayout, CenterLayout } from '../ui/layouts.jsx'
 import { reportReasons } from '../data.js'
 import { moderation as moderationApi, gifts as giftsApi, notifications as notificationsApi } from '../api/index.js'
 import { useAuth } from '../state/AuthContext.jsx'
+import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 import { errorMessage } from '../lib/errors.js'
 import { dayLabel, clockTime } from '../lib/format.js'
-import { onSocketEvent } from '../lib/socket.js'
+import { onSocketEventWhenReady } from '../lib/socket.js'
 
 /* 44 — Notifications */
 // v1 notification types from the backend: gift, withdrawal_status, missed_call. Rendered
@@ -22,6 +23,7 @@ const notifTitle = (n) => n.title || n.message || { gift: 'You received a gift',
 const notifSub = (n) => n.sub || n.subtitle || n.body || ''
 
 export function Notifications() {
+  const { refresh: refreshUnreadBadge, decrementBy } = useNotificationsCount()
   const [f, setF] = useState('All')
   const [items, setItems] = useState([])
   const [page, setPage] = useState(1)
@@ -44,17 +46,19 @@ export function Notifications() {
   }
   useEffect(() => load(1), []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => onSocketEvent('notification:new', (n) => setItems((prev) => [n, ...prev])), [])
+  useEffect(() => onSocketEventWhenReady('notification:new', (n) => setItems((prev) => [n, ...prev])), [])
 
   const markRead = (n) => {
     if (notifRead(n)) return
     setItems((prev) => prev.map((it) => (it === n ? { ...it, isRead: true, read: true } : it)))
-    notificationsApi.markRead(notifId(n)).catch(() => {})
+    decrementBy(1)
+    notificationsApi.markRead(notifId(n)).catch(() => refreshUnreadBadge()) // resync the badge if the call actually failed
   }
 
   const markAllRead = () => {
     setItems((prev) => prev.map((it) => ({ ...it, isRead: true, read: true })))
-    notificationsApi.markAllRead().catch(() => {})
+    decrementBy(Infinity)
+    notificationsApi.markAllRead().catch(() => refreshUnreadBadge())
   }
 
   const unreadCount = items.filter((n) => !notifRead(n)).length
