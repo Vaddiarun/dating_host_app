@@ -5,12 +5,14 @@ import { Avatar, Toggle, SectionTitle, ErrorCard } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { queue } from '../data.js'
 import { useAuth } from '../state/AuthContext.jsx'
+import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 import { earnings as earningsApi, presence as presenceApi } from '../api/index.js'
 import { rupees, clockTime } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
 
 function MobileHead({ label, tone, name }) {
   const nav = useNavigate()
+  const { unreadCount } = useNotificationsCount()
   const t = { offline: 'bg-black/5 text-ink-500', online: 'bg-emerald-50 text-emerald-600', call: 'bg-gold-50 text-gold-600', live: 'bg-rose-50 text-rose-500' }[tone]
   return (
     <div className="lg:hidden px-5 pt-2 pb-3 flex items-center gap-2 bg-white">
@@ -19,10 +21,10 @@ function MobileHead({ label, tone, name }) {
         <p className="text-[16px] font-bold text-ink-900 leading-tight truncate">Hi, {name}</p>
         <span className={`pill ${t} mt-0.5`}><span className="h-1.5 w-1.5 rounded-full bg-current" /> {label}</span>
       </div>
-      {[['bell', '/notifications', 4], ['wallet', '/earnings'], ['settings', '/settings']].map(([i, to, b]) => (
+      {[['bell', '/notifications', unreadCount], ['wallet', '/earnings', 0], ['settings', '/settings', 0]].map(([i, to, b]) => (
         <button key={i} onClick={() => nav(to)} className="relative h-9 w-9 grid place-items-center rounded-xl border border-black/10 text-ink-700 shrink-0">
           <Icon name={i} size={17} />
-          {b && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 grid place-items-center rounded-full bg-brand-600 text-white text-[10px]">{b}</span>}
+          {b > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 grid place-items-center rounded-full bg-brand-600 text-white text-[10px]">{b}</span>}
         </button>
       ))}
     </div>

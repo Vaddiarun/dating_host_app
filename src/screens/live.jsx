@@ -8,7 +8,7 @@ import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.j
 import { useAuth } from '../state/AuthContext.jsx'
 import { ErrorCard } from '../ui/kit.jsx'
 import { errorMessage } from '../lib/errors.js'
-import { onSocketEvent } from '../lib/socket.js'
+import { onSocketEventWhenReady } from '../lib/socket.js'
 
 /* 22 — Go live setup */
 export function GoLive() {
@@ -125,7 +125,7 @@ export function Broadcast() {
   // broadcast's socket room (previously only viewers were — host got nothing).
   useEffect(() => {
     if (!broadcastId) return
-    return onSocketEvent('live:chat', (msg) => {
+    return onSocketEventWhenReady('live:chat', (msg) => {
       if (msg?.broadcastId && msg.broadcastId !== broadcastId) return
       setChat((c) => [...c, { n: msg.senderName || 'Viewer', t: msg.content }])
     })

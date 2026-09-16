@@ -36,3 +36,25 @@ export function onSocketEvent(event, handler) {
   s.on(event, handler)
   return () => s.off(event, handler)
 }
+
+/** Like onSocketEvent, but for an effect that only runs once (e.g. on mount) — the socket may
+ * still be mid-handshake right then, so this keeps retrying to attach until it exists (or the
+ * caller unsubscribes) instead of silently missing the window. */
+export function onSocketEventWhenReady(event, handler) {
+  let cancelled = false
+  let detach = () => {}
+  const attach = () => {
+    const s = getSocket()
+    if (!s) {
+      if (!cancelled) setTimeout(attach, 300)
+      return
+    }
+    s.on(event, handler)
+    detach = () => s.off(event, handler)
+  }
+  attach()
+  return () => {
+    cancelled = true
+    detach()
+  }
+}

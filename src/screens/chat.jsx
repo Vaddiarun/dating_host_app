@@ -5,7 +5,7 @@ import { PlainHeader, Avatar, Segmented, ErrorCard } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { chat as chatApi } from '../api/index.js'
 import { timeAgo, clockTime } from '../lib/format.js'
-import { onSocketEvent } from '../lib/socket.js'
+import { onSocketEventWhenReady } from '../lib/socket.js'
 import { errorMessage } from '../lib/errors.js'
 
 function ConversationList({ list, activeId, onPick, filter, setFilter, loading, err, onRetry }) {
@@ -66,7 +66,7 @@ function Thread({ conv }) {
 
   useEffect(() => {
     if (!recipientId) return
-    return onSocketEvent('chat:message', (m) => {
+    return onSocketEventWhenReady('chat:message', (m) => {
       if (m.conversationId !== conv.id && m.senderId !== recipientId) return
       setMessages((prev) => (prev.some((x) => x.id === m.messageId) ? prev : [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, createdAt: m.createdAt }]))
     })
@@ -154,7 +154,7 @@ export function Chat() {
   }, [])
 
   useEffect(() => { reloadConversations() }, [reloadConversations])
-  useEffect(() => onSocketEvent('chat:message', reloadConversations), [reloadConversations])
+  useEffect(() => onSocketEventWhenReady('chat:message', reloadConversations), [reloadConversations])
 
   const conv = conversations.find((c) => c.id === id)
   const list = filter === 'Unread' ? [] : conversations
