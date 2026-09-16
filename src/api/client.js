@@ -34,7 +34,7 @@ async function refreshAccessToken() {
   const { refreshToken } = getTokens()
   if (!refreshToken) throw new ApiError('No refresh token', 401)
   if (!refreshPromise) {
-    refreshPromise = fetch(`${BASE_URL}/auth/token/refresh`, {
+    refreshPromise = fetch(`${BASE_URL}/host/auth/token/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
@@ -52,8 +52,11 @@ async function refreshAccessToken() {
   return refreshPromise
 }
 
+// The backend now namespaces every endpoint by app (API-design follow-up) —
+// this app only ever calls the Host surface, so every path gets /host
+// prepended here in one place rather than at each call site.
 function buildUrl(path, query) {
-  let url = `${BASE_URL}${path}`
+  let url = `${BASE_URL}/host${path}`
   if (query && Object.keys(query).length) {
     const qs = new URLSearchParams(
       Object.entries(query).filter(([, v]) => v !== undefined && v !== null && v !== ''),
