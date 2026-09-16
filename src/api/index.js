@@ -62,6 +62,7 @@ export const presence = {
 
 export const calls = {
   accept: (id) => apiFetch(`/calls/${id}/accept`, { method: 'POST' }),
+  reject: (id) => apiFetch(`/calls/${id}/reject`, { method: 'POST' }),
   get: (id) => apiFetch(`/calls/${id}`),
   end: (id) => apiFetch(`/calls/${id}/end`, { method: 'POST' }),
   rate: (id, stars) => apiFetch(`/calls/${id}/rating`, { method: 'POST', body: { stars } }),

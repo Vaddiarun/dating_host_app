@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { auth as authApi, profile as profileApi } from '../api/index.js'
-import { getTokens, clearTokens } from '../api/client.js'
+import { getTokens, clearTokens, ApiError } from '../api/client.js'
 import { connectSocket, disconnectSocket } from '../lib/socket.js'
 
 const AuthContext = createContext(null)
@@ -61,7 +61,17 @@ export function AuthProvider({ children }) {
   }, [])
 
   const verifyOtp = useCallback(async (phone, code) => {
-    await authApi.verifyOtp(phone, code, 'host')
+    const verified = await authApi.verifyOtp(phone, code, 'host')
+    // `role` is only honored by the backend for a brand-new signup — an
+    // existing account (e.g. this phone number was already used on the
+    // User app) keeps whatever role it already has, regardless of what we
+    // asked for here. Without this check, that phone number logs in "fine"
+    // but every host-only endpoint afterward 403s ("Not allowed for this
+    // role"), landing on a broken dashboard with no explanation.
+    if (verified.user?.role !== 'host') {
+      clearTokens()
+      throw new ApiError('This number is already registered as a different account type. Use a different number, or log in from the correct app.', 403)
+    }
     const data = await profileApi.getMe()
     setMe(data)
     setStatus('authed')
