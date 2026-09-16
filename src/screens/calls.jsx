@@ -116,6 +116,19 @@ export function IncomingCall() {
     }
   }
 
+  // Previously just navigated away with no server call at all, so the backend (and the
+  // caller, who's waiting on `call:ended`) never learned the call was declined — the
+  // caller's ringing screen would just sit there until the ringing timeout expired.
+  const decline = async () => {
+    if (callId) {
+      try { await callsApi.reject(callId) } catch {
+        // best-effort — leaving the incoming-call screen either way; a failed reject here
+        // (e.g. the call already timed out server-side) shouldn't trap the host on this screen
+      }
+    }
+    nav('/calls')
+  }
+
   return (
     <CallStage>
       <div className="flex-1 flex flex-col items-center pt-16 px-6">
@@ -129,7 +142,7 @@ export function IncomingCall() {
         {err && <p className="text-[13px] text-rose-300 mt-4 px-6 text-center">{err}</p>}
       </div>
       <div className="pb-14 px-10 flex items-end justify-between">
-        <button onClick={() => nav('/calls')} className="flex flex-col items-center gap-2">
+        <button onClick={decline} disabled={busy} className="flex flex-col items-center gap-2">
           <span className="h-16 w-16 grid place-items-center rounded-full bg-rose-500"><Icon name="phone-off" size={24} /></span>
           <span className="text-[12px] text-white/70">Decline</span>
         </button>
