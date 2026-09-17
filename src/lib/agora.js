@@ -27,14 +27,25 @@ export function appIdFromToken(token) {
   return new TextDecoder().decode(bytes.slice(o, o + appIdLen))
 }
 
-/** Joins an Agora RTC channel, publishes the local mic + camera, and returns everything
- * needed to render/control the session. `onRemoteUser(user, mediaType)` fires whenever a
- * remote participant's audio/video becomes available, already subscribed. */
-export async function joinAndPublish({ channelName, token, uid, video = true, onRemoteUser } = {}) {
+/**
+ * Joins an Agora channel, publishes the local mic + camera, and returns everything needed
+ * to render/control the session. `onRemoteUser(user, mediaType)` fires whenever a remote
+ * participant's audio/video becomes available, already subscribed.
+ *
+ * `mode`/`role`: 1:1 calls use the default 'rtc' (Communication) profile, where every
+ * participant can freely publish/subscribe — there's no host/audience distinction to make.
+ * A live broadcast is one-to-many, so it should use the 'live' (Live Broadcasting) profile
+ * with an explicit role — that's the only channel profile Agora actually enforces
+ * publisher/subscriber privileges under; the backend's tokens already encode PUBLISHER vs
+ * SUBSCRIBER per role (live.routes.ts), but that encoding does nothing under plain 'rtc'
+ * mode, which is what every join used to request regardless of call vs. broadcast.
+ */
+export async function joinAndPublish({ channelName, token, uid, video = true, mode = 'rtc', role, onRemoteUser } = {}) {
   const RTC = await sdk()
   RTC.setLogLevel(4) // errors only — the SDK is chatty at its default level
   const appId = appIdFromToken(token)
-  const client = RTC.createClient({ mode: 'rtc', codec: 'vp8' })
+  const client = RTC.createClient({ mode, codec: 'vp8' })
+  if (mode === 'live' && role) await client.setClientRole(role)
 
   if (onRemoteUser) {
     client.on('user-published', async (user, mediaType) => {

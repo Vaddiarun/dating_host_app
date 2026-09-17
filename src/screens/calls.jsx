@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { StatusBar, PlainHeader, Avatar, Segmented, SectionTitle, ErrorCard } from '../ui/kit.jsx'
+import { GiftRequestSheet } from './misc.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
 import { calls as callsApi, earnings as earningsApi } from '../api/index.js'
 import { rupees, clockTime, dayLabel } from '../lib/format.js'
@@ -206,9 +207,12 @@ export function ActiveCall() {
   const [callErr, setCallErr] = useState('')
   const [remoteJoined, setRemoteJoined] = useState(false)
   const [flipping, setFlipping] = useState(false)
+  const [giftOpen, setGiftOpen] = useState(false)
   const remoteVideoRef = useRef(null)
   const localVideoRef = useRef(null)
   const sessionRef = useRef(null)
+  const joinRef = useRef(null) // { key, promise } — see the join effect below
+  const leaveTimerRef = useRef(null)
 
   useEffect(() => {
     if (!callId) return
@@ -222,41 +226,69 @@ export function ActiveCall() {
 
   useEffect(() => {
     if (!channelName || !agoraToken) { setRtcErr('No call credentials — rejoin from Calls.'); return }
+    const key = `${channelName}|${agoraToken}`
+    clearTimeout(leaveTimerRef.current)
     let cancelled = false
-    joinAndPublish({
-      channelName,
-      token: agoraToken,
-      uid: me?.id,
-      onRemoteUser: (user, mediaType, left) => {
-        // Agora fires this once per media type (audio and video publish/
-        // subscribe independently) — this used to bail out entirely for
-        // anything but 'video', so the caller's subscribed audio track was
-        // never actually started. Subscribing alone doesn't play it; the
-        // SDK requires an explicit .play() call, same as video.
-        if (left) {
-          if (mediaType === 'video') setRemoteJoined(false)
-          return
-        }
-        if (mediaType === 'video') {
-          // Explicit `fit: 'cover'` — left unset, the SDK letterboxes the remote feed
-          // (black bars either side) whenever its captured aspect ratio doesn't match
-          // this container's; cover crops to fill instead, like every other call UI.
-          user.videoTrack?.play(remoteVideoRef.current, { fit: 'cover' })
-          setRemoteJoined(true)
-        } else if (mediaType === 'audio') {
-          user.audioTrack?.play()
-        }
-      },
-    })
+
+    // React 18 Strict Mode (dev only) mounts, synchronously unmounts, then remounts this same
+    // component — before the first `client.join()` round-trip to Agora has any chance to
+    // resolve. Checking only the *resolved* session is too late, since by the time the remount
+    // runs nothing has resolved yet, so it would start a second real join with the same uid —
+    // Agora's server sees two simultaneous joins and throws UID_CONFLICT. Caching the *promise*
+    // itself (refs survive the synthetic remount) closes that gap: the remount attaches its own
+    // .then() to the SAME in-flight join instead of starting another one.
+    if (!(joinRef.current && joinRef.current.key === key)) {
+      joinRef.current = {
+        key,
+        promise: joinAndPublish({
+          channelName,
+          token: agoraToken,
+          uid: me?.id,
+          onRemoteUser: (user, mediaType, left) => {
+            // Agora fires this once per media type (audio and video publish/
+            // subscribe independently) — this used to bail out entirely for
+            // anything but 'video', so the caller's subscribed audio track was
+            // never actually started. Subscribing alone doesn't play it; the
+            // SDK requires an explicit .play() call, same as video.
+            if (left) {
+              if (mediaType === 'video') setRemoteJoined(false)
+              return
+            }
+            if (mediaType === 'video') {
+              // Explicit `fit: 'cover'` — left unset, the SDK letterboxes the remote feed
+              // (black bars either side) whenever its captured aspect ratio doesn't match
+              // this container's; cover crops to fill instead, like every other call UI.
+              user.videoTrack?.play(remoteVideoRef.current, { fit: 'cover' })
+              setRemoteJoined(true)
+            } else if (mediaType === 'audio') {
+              user.audioTrack?.play()
+            }
+          },
+        }),
+      }
+    }
+
+    joinRef.current.promise
       .then((session) => {
-        if (cancelled) { leaveChannel(session); return }
+        if (cancelled) return // a still-mounted invocation (if any) owns this session now
         sessionRef.current = session
         session.localVideoTrack?.play(localVideoRef.current, { fit: 'cover' })
       })
-      .catch((e) => { console.error('Agora join failed:', e); setRtcErr(errorMessage(e, 'Could not start the camera/mic for this call.')) })
+      .catch((e) => {
+        if (cancelled) return
+        console.error('Agora join failed:', e)
+        setRtcErr(errorMessage(e, 'Could not start the camera/mic for this call.'))
+      })
+
     return () => {
       cancelled = true
-      if (sessionRef.current) leaveChannel(sessionRef.current)
+      leaveTimerRef.current = setTimeout(() => {
+        // Nothing re-claimed this join within the grace window — this is a real unmount.
+        if (joinRef.current?.key !== key) return
+        joinRef.current.promise.then((session) => leaveChannel(session)).catch(() => {})
+        joinRef.current = null
+        sessionRef.current = null
+      }, 400)
     }
   }, [channelName, agoraToken])
 
@@ -283,7 +315,11 @@ export function ActiveCall() {
   const estBeans = Math.round((ratePaise * elapsed) / 60)
 
   const endCall = async () => {
-    if (sessionRef.current) await leaveChannel(sessionRef.current)
+    if (sessionRef.current) {
+      await leaveChannel(sessionRef.current)
+      sessionRef.current = null
+      joinRef.current = null
+    }
     if (!callId) { nav('/call/summary'); return }
     setEnding(true)
     try {
@@ -326,9 +362,12 @@ export function ActiveCall() {
         <div className="w-full max-w-[480px] mx-auto pb-8 px-6 flex items-center justify-between">
           <button onClick={() => setMuted((m) => !m)} className={`h-12 w-12 grid place-items-center rounded-full ${muted ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name={muted ? 'mic-off' : 'mic'} size={20} /></button>
           <button onClick={() => setCam((c) => !c)} className={`h-12 w-12 grid place-items-center rounded-full ${cam ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={cam ? 'video' : 'camera-off'} size={20} /></button>
-          <button onClick={() => nav('/gift/ask/call', { state: { userId: call?.userId } })} className="h-12 w-12 grid place-items-center rounded-full bg-white/12"><Icon name="gift" size={20} /></button>
+          <button onClick={() => setGiftOpen(true)} className="h-12 w-12 grid place-items-center rounded-full bg-white/12"><Icon name="gift" size={20} /></button>
           <button onClick={endCall} disabled={ending} className="h-14 w-14 grid place-items-center rounded-full bg-rose-500"><Icon name="phone-off" size={22} /></button>
         </div>
+        {/* Overlay, not a route — navigating away used to unmount this screen entirely and
+            tear down the live Agora session just to ask for a gift. */}
+        {giftOpen && <GiftRequestSheet userId={call?.userId} onClose={() => setGiftOpen(false)} />}
       </div>
     </ImmersiveLayout>
   )

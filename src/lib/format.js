@@ -11,6 +11,13 @@ export function beans(n) {
   return (n ?? 0).toLocaleString('en-IN')
 }
 
+/** Compact form for tight leaderboard rows — 8210 -> "8.2K", 920 -> "920". */
+export function compactBeans(n) {
+  const v = n ?? 0
+  if (v >= 1000) return `${(v / 1000).toFixed(1).replace(/\.0$/, '')}K`
+  return String(v)
+}
+
 export function initialsName(host) {
   return host?.name || host?.username || host?.phone || 'Host'
 }

@@ -5,6 +5,7 @@ import RealtimeBridge from './state/RealtimeBridge.jsx'
 import { Splash, Login, Otp, ProfileSetup, LiveAudition, KycIntro, DocumentUpload, PayoutAccount, UnderReview, Verified, Rejected } from './screens/onboarding.jsx'
 import Home from './screens/home.jsx'
 import { TopSpenders, TopPerformers } from './screens/leaderboard.jsx'
+import Performance from './screens/performance.jsx'
 import { CallsList, IncomingCall, Connecting, ActiveCall, CallSummary } from './screens/calls.jsx'
 import { ChatList, ChatConvo } from './screens/chat.jsx'
 import { GoLive, Broadcast, LiveSummary } from './screens/live.jsx'
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/onboarding/rejected" element={<Rejected />} />
 
         <Route path="/settings" element={<Settings />} />
+        <Route path="/settings/performance" element={<Performance />} />
         <Route path="/settings/kyc" element={<KycStatus />} />
         <Route path="/settings/edit-profile" element={<EditProfile />} />
         <Route path="/settings/rates" element={<RateSettings />} />

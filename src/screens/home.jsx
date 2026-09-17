@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
-import { Avatar, Toggle, SectionTitle, ErrorCard } from '../ui/kit.jsx'
+import { Avatar, Toggle, SectionTitle, ErrorCard, FloatingGoLive } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { useAuth } from '../state/AuthContext.jsx'
 import { useNotificationsCount } from '../state/NotificationsContext.jsx'
@@ -250,6 +250,7 @@ export default function Home() {
           </div>
         </div>
       )}
+      {(state === 'offline' || state === 'online') && <FloatingGoLive />}
     </AppLayout>
   )
 }

@@ -45,6 +45,7 @@ export function Settings() {
         <div className="px-5 lg:px-0 -mt-4 lg:mt-4 pb-4">
           <SectionTitle className="mt-5 mb-1">Account</SectionTitle>
           <div className="card px-4 divide-y divide-black/5">
+            <Row icon="trending-up" tone="brand" title="Performance" sub="Meter, livestream score & leaderboards" onClick={() => nav('/settings/performance')} />
             <Row icon="settings" tone="brand" title="Edit profile" sub="Name, bio, languages" onClick={() => nav('/settings/edit-profile')} />
             <Row icon="image" tone="brand" title="Gallery" sub="Photos & videos" onClick={() => nav('/settings/gallery')} />
             <Row icon="wallet" tone="gold" title="Rate settings" sub={videoRate ? `${rupees(videoRate)}/min video` : 'Set your rates'} onClick={() => nav('/settings/rates')} />

@@ -241,12 +241,13 @@ export function Blocked() {
 }
 
 /* 48 — Ask for a gift */
-export function AskGift() {
-  const nav = useNavigate()
-  const { ctx } = useParams()
-  const location = useLocation()
-  const userId = location.state?.userId
-  const isLive = ctx?.startsWith('live')
+/**
+ * The actual "ask for a gift" bottom sheet — factored out so it can be dropped in as an
+ * overlay on top of a live call/broadcast (see calls.jsx / live.jsx) instead of only being
+ * reachable by navigating to a whole separate route. Navigating away used to unmount the
+ * call screen entirely, which tore down the live Agora session just to ask for a gift.
+ */
+export function GiftRequestSheet({ userId, onClose }) {
   const [catalog, setCatalog] = useState([])
   const [pick, setPick] = useState(null)
   const [note, setNote] = useState('')
@@ -272,7 +273,7 @@ export function AskGift() {
     try {
       if (userId) await giftsApi.request(userId, pick)
       setSent(true)
-      setTimeout(() => nav(-1), 1200)
+      setTimeout(onClose, 1200)
     } catch (e) {
       setSendErr(errorMessage(e, 'Could not send that request.'))
       setBusy(false)
@@ -280,10 +281,50 @@ export function AskGift() {
   }
 
   return (
+    <div className="fixed inset-0 z-30 flex items-end justify-center animate-fade-in">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative w-full max-w-[480px] bg-white rounded-t-3xl p-5 pt-4 text-ink-900 animate-sheet-up max-h-[80dvh] overflow-y-auto no-scrollbar">
+        <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-black/15" />
+        <div className="flex items-center justify-between">
+          <h3 className="text-[17px] font-bold">Ask for a gift</h3>
+          <button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-full bg-black/5 text-ink-500"><Icon name="x" size={15} /></button>
+        </div>
+        {sent ? (
+          <p className="text-[13px] text-emerald-600 font-semibold mt-3 flex items-center gap-2"><Icon name="check" size={16} /> Request sent!</p>
+        ) : (
+          <>
+            {catalog.length === 0 && <ErrorCard message={catalogErr} onRetry={loadCatalog} className="mt-2.5" />}
+            <div className="grid grid-cols-3 gap-2.5 mt-2.5">
+              {catalog.map((g) => (
+                <button key={g.id} onClick={() => setPick(g.id)} className={`rounded-2xl border py-2.5 flex flex-col items-center gap-0.5 ${pick === g.id ? 'border-gold-400 bg-gold-50' : 'border-black/10'}`}>
+                  <span className="text-xl">🎁</span>
+                  <span className="text-[13px] font-semibold text-center px-1">{g.name}</span>
+                  <span className="text-[12px] font-bold text-gold-500">{(g.pricePaise / 100).toLocaleString('en-IN')}</span>
+                </button>
+              ))}
+            </div>
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a sweet note…" className="input mt-2.5" />
+            {sendErr && <p className="text-[12px] text-rose-500 mt-2">{sendErr}</p>}
+            <button onClick={send} disabled={busy || !pick} className="btn-gold mt-2.5 disabled:opacity-60"><Icon name="gift" size={16} /> {busy ? 'Sending…' : 'Send request'}</button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function AskGift() {
+  const nav = useNavigate()
+  const { ctx } = useParams()
+  const location = useLocation()
+  const userId = location.state?.userId
+  const isLive = ctx?.startsWith('live')
+
+  return (
     <ImmersiveLayout>
-      <div className="mx-auto flex min-h-[100dvh] max-w-[520px] flex-col text-white bg-gradient-to-b from-night-700 via-night-800 to-night-900">
+      <div className="flex min-h-[100dvh] w-full flex-col text-white bg-gradient-to-b from-night-700 via-night-800 to-night-900">
         <StatusBar dark />
-        <div className="px-4">
+        <div className="w-full max-w-[480px] mx-auto px-4">
           {isLive ? (
             <div className="flex items-center gap-2">
               <span className="pill bg-black/40 text-white text-[12px]"><Avatar name="You" size={20} /> You <span className="text-rose-400 font-bold">● LIVE</span></span>
@@ -295,29 +336,7 @@ export function AskGift() {
           )}
         </div>
         <div className="flex-1 min-h-[64px] grid place-items-center"><div className="h-40 w-40 sm:h-52 sm:w-52 rounded-full bg-white/5" /></div>
-        <div className="bg-white rounded-t-3xl p-5 pt-4 text-ink-900 animate-sheet-up max-h-[80dvh] overflow-y-auto no-scrollbar">
-          <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-black/15" />
-          <h3 className="text-[17px] font-bold">Ask for a gift</h3>
-          {sent ? (
-            <p className="text-[13px] text-emerald-600 font-semibold mt-3 flex items-center gap-2"><Icon name="check" size={16} /> Request sent!</p>
-          ) : (
-            <>
-              {catalog.length === 0 && <ErrorCard message={catalogErr} onRetry={loadCatalog} className="mt-2.5" />}
-              <div className="grid grid-cols-3 gap-2.5 mt-2.5">
-                {catalog.map((g) => (
-                  <button key={g.id} onClick={() => setPick(g.id)} className={`rounded-2xl border py-2.5 flex flex-col items-center gap-0.5 ${pick === g.id ? 'border-gold-400 bg-gold-50' : 'border-black/10'}`}>
-                    <span className="text-xl">🎁</span>
-                    <span className="text-[13px] font-semibold text-center px-1">{g.name}</span>
-                    <span className="text-[12px] font-bold text-gold-500">{(g.pricePaise / 100).toLocaleString('en-IN')}</span>
-                  </button>
-                ))}
-              </div>
-              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a sweet note…" className="input mt-2.5" />
-              {sendErr && <p className="text-[12px] text-rose-500 mt-2">{sendErr}</p>}
-              <button onClick={send} disabled={busy || !pick} className="btn-gold mt-2.5 disabled:opacity-60"><Icon name="gift" size={16} /> {busy ? 'Sending…' : 'Send request'}</button>
-            </>
-          )}
-        </div>
+        <GiftRequestSheet userId={userId} onClose={() => nav(-1)} />
       </div>
     </ImmersiveLayout>
   )

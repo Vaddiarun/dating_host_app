@@ -118,11 +118,15 @@ export function Broadcast() {
   const [rtcErr, setRtcErr] = useState('')
   const [flipping, setFlipping] = useState(false)
   const [viewerCount, setViewerCount] = useState(0)
+  const [agoraPeers, setAgoraPeers] = useState(0)
   const [, tick] = useState(0)
   const videoContainerRef = useRef(null)
   const sessionRef = useRef(null)
+  const joinRef = useRef(null) // { key, promise } — see the join effect below
+  const leaveTimerRef = useRef(null)
   const msgIdRef = useRef(0)
   const endedRef = useRef(false)
+  const endTimerRef = useRef(null)
 
   // Comments should float over the video and fade away like Instagram/TikTok live —
   // ticking once a second re-derives which ones are still within their visible window
@@ -154,19 +158,62 @@ export function Broadcast() {
 
   useEffect(() => {
     if (!channelName || !agoraToken) { setRtcErr('No stream credentials — rejoin from Go live.'); return }
+    const key = `${channelName}|${agoraToken}`
+    clearTimeout(leaveTimerRef.current)
     let cancelled = false
-    // The token is bound to the joining user's own id — Agora rejects a mismatched uid.
-    joinAndPublish({ channelName, token: agoraToken, uid: me?.id })
+
+    // React 18 Strict Mode (dev only) mounts this component, synchronously unmounts it, then
+    // remounts the same instance — all before the first `client.join()` network round-trip to
+    // Agora has any chance to resolve. Checking only the *resolved* session (as a previous
+    // version of this fix did) was too late: by the time the remount's effect ran, nothing had
+    // resolved yet, so it started a second real `joinAndPublish()` call with the same uid —
+    // Agora's server sees two simultaneous joins and throws UID_CONFLICT. Caching the *promise*
+    // itself (refs survive the synthetic remount) closes that gap: the remount attaches its own
+    // .then() to the SAME in-flight join instead of starting another one.
+    if (!(joinRef.current && joinRef.current.key === key)) {
+      joinRef.current = {
+        key,
+        // The token is bound to the joining user's own id — Agora rejects a mismatched uid.
+        // 'live' mode + 'host' role: this is a one-to-many broadcast, and the backend already
+        // issues a PUBLISHER-role token for the host (live.routes.ts) — that only actually
+        // grants publish rights under Agora's Live Broadcasting profile, which plain 'rtc'
+        // mode ignores.
+        promise: joinAndPublish({ channelName, token: agoraToken, uid: me?.id, mode: 'live', role: 'host' }),
+      }
+    }
+
+    joinRef.current.promise
       .then((session) => {
-        if (cancelled) { leaveChannel(session); return }
+        if (cancelled) return // a still-mounted invocation (if any) owns this session now
         sessionRef.current = session
         session.localVideoTrack?.play(videoContainerRef.current, { fit: 'cover' })
         session.localAudioTrack?.setEnabled(mic)
+
+        // Diagnostic only — separate from the backend's own DB-tracked viewerCount below.
+        // 'user-joined'/'user-left' fire for ANY client that joins this Agora channel, audience
+        // included, whether or not they publish anything — this is the one signal that proves
+        // a viewer's *Agora* client actually connected, as opposed to just being recorded as
+        // "in the room" by the backend. If this stays 0 while the backend viewerCount is >0,
+        // the break is on the viewer app's Agora join, not anything in this broadcast screen.
+        session.client.on('user-joined', () => setAgoraPeers(session.client.remoteUsers.length))
+        session.client.on('user-left', () => setAgoraPeers(session.client.remoteUsers.length))
+        setAgoraPeers(session.client.remoteUsers.length)
       })
-      .catch((e) => { console.error('Agora join failed:', e); setRtcErr(errorMessage(e, 'Could not start the camera/mic for this broadcast.')) })
+      .catch((e) => {
+        if (cancelled) return
+        console.error('Agora join failed:', e)
+        setRtcErr(errorMessage(e, 'Could not start the camera/mic for this broadcast.'))
+      })
+
     return () => {
       cancelled = true
-      if (sessionRef.current) leaveChannel(sessionRef.current)
+      leaveTimerRef.current = setTimeout(() => {
+        // Nothing re-claimed this join within the grace window — this is a real unmount.
+        if (joinRef.current?.key !== key) return
+        joinRef.current.promise.then((session) => leaveChannel(session)).catch(() => {})
+        joinRef.current = null
+        sessionRef.current = null
+      }, 400)
     }
   }, [channelName, agoraToken]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -177,10 +224,25 @@ export function Broadcast() {
   // the backend broadcast record was never told to end, so it stayed "live" forever and kept
   // showing as broadcasting everywhere that reads it. Ending it here on unmount too, guarded
   // by endedRef so it isn't double-sent when the explicit end button already did it.
-  useEffect(() => () => {
-    if (!endedRef.current && broadcastId) {
-      endedRef.current = true
-      liveApi.end(broadcastId).catch(() => {})
+  //
+  // This must NOT fire immediately: in dev, React 18 StrictMode mounts this component,
+  // synchronously unmounts it, then remounts the same instance to surface effect bugs — an
+  // immediate end() call here was ending the just-started broadcast within the same second
+  // (visible as startedAt/endedAt ~1s apart, then the real mount's camera join racing the
+  // StrictMode-remount's, producing the NOT_READABLE "device in use" error). Refs survive
+  // that synthetic remount, so deferring the call and cancelling it if this effect re-runs
+  // right after tells a real unmount apart from StrictMode's fake one. Production builds
+  // (npm run preview) don't double-invoke at all, so this delay is a no-op there.
+  useEffect(() => {
+    clearTimeout(endTimerRef.current)
+    return () => {
+      if (endedRef.current || !broadcastId) return
+      endTimerRef.current = setTimeout(() => {
+        if (!endedRef.current) {
+          endedRef.current = true
+          liveApi.end(broadcastId).catch(() => {})
+        }
+      }, 400)
     }
   }, [broadcastId])
 
@@ -213,7 +275,11 @@ export function Broadcast() {
   const end = async () => {
     setEnding(true)
     endedRef.current = true
-    if (sessionRef.current) await leaveChannel(sessionRef.current)
+    if (sessionRef.current) {
+      await leaveChannel(sessionRef.current)
+      sessionRef.current = null
+      joinRef.current = null
+    }
     try {
       if (broadcastId) await liveApi.end(broadcastId)
     } finally {
@@ -228,6 +294,10 @@ export function Broadcast() {
         <div className="w-full max-w-[480px] mx-auto px-4 flex items-center gap-2">
           <span className="pill bg-black/40 text-white text-[12px]"><Avatar name="You" size={22} /> You <span className="text-rose-400 font-bold">● LIVE</span></span>
           <span className="pill bg-black/40 text-white text-[12px]"><Icon name="eye" size={12} /> {viewerCount}</span>
+          {/* Diagnostic: how many of those viewers Agora itself sees as actually connected.
+              If this is 0 while the count above isn't, the viewer app never joined the Agora
+              channel — the problem is on their side, not in this broadcast. */}
+          <span className={`pill text-[12px] ${agoraPeers > 0 ? 'bg-emerald-500/30 text-emerald-200' : 'bg-black/40 text-white/60'}`} title="Viewers Agora itself sees as connected"><Icon name="live" size={12} /> RTC {agoraPeers}</span>
           <button onClick={flipCamera} disabled={flipping} className="ml-auto h-9 w-9 grid place-items-center rounded-full bg-black/40 text-white disabled:opacity-50"><Icon name="flip" size={16} /></button>
         </div>
         <div className="flex-1 relative overflow-hidden">

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { Avatar, Segmented, FloatingGoLive } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
-import { beans } from '../lib/format.js'
+import { compactBeans } from '../lib/format.js'
 
 /* No leaderboard endpoint exists on the backend yet — these are placeholder rankings so the
  * screen can be built and reviewed now; swap for a real /leaderboard fetch once it exists. */
@@ -45,13 +45,31 @@ const PERFORMERS = {
   ],
 }
 
-function Header({ title, altTo, altLabel }) {
+function Header({ title }) {
   const nav = useNavigate()
   return (
-    <div className="lg:hidden flex items-center justify-between px-4 pt-4 pb-1 text-white">
-      <button onClick={() => nav(-1)} className="h-9 w-9 grid place-items-center rounded-full bg-white/10"><Icon name="chevron-left" size={19} /></button>
+    <div className="lg:hidden relative flex items-center justify-center px-4 pt-4 pb-1 text-white">
+      <button onClick={() => nav(-1)} className="absolute left-4 h-9 w-9 grid place-items-center rounded-full bg-white/10"><Icon name="chevron-left" size={19} /></button>
       <h1 className="text-[17px] font-extrabold">{title}</h1>
-      <button onClick={() => nav(altTo)} title={altLabel} className="h-9 w-9 grid place-items-center rounded-full bg-white/10"><Icon name="crown" size={16} /></button>
+    </div>
+  )
+}
+
+/* Unified pill track (one bg housing both tabs, active tab gets its own white capsule) —
+ * distinct from the shared <Segmented> (which renders two separate bordered pills) because
+ * the design here calls for the two to visually share one enclosing track. */
+function WeekToggle({ value, onChange }) {
+  return (
+    <div className="inline-flex rounded-full bg-white/15 p-1">
+      {['This Week', 'Last Week'].map((label) => (
+        <button
+          key={label}
+          onClick={() => onChange(label)}
+          className={`px-4 py-1.5 rounded-full text-[13px] font-semibold transition ${value === label ? 'bg-white text-brand-700' : 'text-white/70'}`}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   )
 }
@@ -65,12 +83,12 @@ function Podium({ top3 }) {
         return (
           <div key={p.name} className={`flex flex-col items-center ${first ? '-mt-4' : ''}`}>
             <div className="relative">
-              <Icon name="crown" size={first ? 20 : 15} className="absolute -top-4 left-1/2 -translate-x-1/2 text-gold-400" />
+              {first && <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[22px] leading-none">👑</span>}
               <Avatar name={p.name} size={first ? 68 : 52} ring="rgba(255,255,255,.8)" />
             </div>
             <p className="text-[12px] font-bold text-white mt-1.5 truncate max-w-[76px]">{p.name}</p>
             <span className="pill bg-white/15 text-white text-[10px] mt-0.5">{p.level}</span>
-            <span className="flex items-center gap-1 text-[11px] font-bold text-gold-300 mt-1"><Icon name="gift" size={11} /> {beans(p.beans)}</span>
+            <span className="flex items-center gap-1 text-[11px] font-bold text-gold-300 mt-1"><Icon name="gift" size={11} /> {compactBeans(p.beans)} beans</span>
           </div>
         )
       })}
@@ -87,12 +105,12 @@ function Row({ rank, p }) {
         <p className="text-[14px] font-semibold text-ink-900 truncate">{p.name}</p>
         <span className="pill bg-black/5 text-ink-400 text-[10px] shrink-0">{p.level}</span>
       </div>
-      <span className="flex items-center gap-1 text-[13px] font-bold text-ink-900 shrink-0"><Icon name="gift" size={13} className="text-gold-500" /> {beans(p.beans)}</span>
+      <span className="flex items-center gap-1 text-[13px] font-bold text-ink-900 shrink-0"><Icon name="gift" size={13} className="text-gold-500" /> {compactBeans(p.beans)} beans</span>
     </div>
   )
 }
 
-function Leaderboard({ title, data, altTo, altLabel }) {
+function Leaderboard({ title, data }) {
   const [week, setWeek] = useState('This Week')
   const list = data[week]
   const top3 = list.slice(0, 3)
@@ -101,9 +119,9 @@ function Leaderboard({ title, data, altTo, altLabel }) {
   return (
     <AppLayout title={title} back maxW="lg" bg="white" pad={false}>
       <div className="lg:hidden bg-gradient-to-br from-brand-700 via-brand-800 to-night-900 rounded-b-3xl">
-        <Header title={title} altTo={altTo} altLabel={altLabel} />
+        <Header title={title} />
         <div className="flex justify-center px-5 pt-3">
-          <Segmented options={['This Week', 'Last Week']} value={week} onChange={setWeek} />
+          <WeekToggle value={week} onChange={setWeek} />
         </div>
         <Podium top3={top3} />
       </div>
