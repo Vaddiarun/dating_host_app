@@ -118,8 +118,18 @@ export function Broadcast() {
   const [rtcErr, setRtcErr] = useState('')
   const [flipping, setFlipping] = useState(false)
   const [viewerCount, setViewerCount] = useState(0)
+  const [, tick] = useState(0)
   const videoContainerRef = useRef(null)
   const sessionRef = useRef(null)
+  const msgIdRef = useRef(0)
+
+  // Comments should float over the video and fade away like Instagram/TikTok live —
+  // ticking once a second re-derives which ones are still within their visible window
+  // (see `visibleChat` below) so old ones drop off instead of piling up in a panel.
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(t)
+  }, [])
 
   // Viewers' chat messages arrive here now that the host is actually joined to the
   // broadcast's socket room (previously only viewers were — host got nothing).
@@ -127,7 +137,7 @@ export function Broadcast() {
     if (!broadcastId) return
     return onSocketEventWhenReady('live:chat', (msg) => {
       if (msg?.broadcastId && msg.broadcastId !== broadcastId) return
-      setChat((c) => [...c, { n: msg.senderName || 'Viewer', t: msg.content }])
+      setChat((c) => [...c, { id: ++msgIdRef.current, n: msg.senderName || 'Viewer', t: msg.content, at: Date.now() }])
     })
   }, [broadcastId])
 
@@ -178,11 +188,14 @@ export function Broadcast() {
     const content = text.trim()
     if (!content) return
     setText('')
-    setChat((c) => [...c, { n: 'You', t: content }])
+    setChat((c) => [...c, { id: ++msgIdRef.current, n: 'You', t: content, at: Date.now() }])
     if (broadcastId) {
       try { await liveApi.sendChat(broadcastId, content) } catch { /* best-effort */ }
     }
   }
+
+  // Keep only the last ~8s of comments, newest last — old ones age out on their own each tick.
+  const visibleChat = chat.filter((c) => Date.now() - c.at < 8000).slice(-8)
 
   const end = async () => {
     setEnding(true)
@@ -203,8 +216,8 @@ export function Broadcast() {
           <span className="pill bg-black/40 text-white text-[12px]"><Icon name="eye" size={12} /> {viewerCount}</span>
           <button onClick={flipCamera} disabled={flipping} className="ml-auto h-9 w-9 grid place-items-center rounded-full bg-black/40 text-white disabled:opacity-50"><Icon name="flip" size={16} /></button>
         </div>
-        <div className="flex-1 relative">
-          <div ref={videoContainerRef} className="absolute inset-0" />
+        <div className="flex-1 relative overflow-hidden">
+          <div ref={videoContainerRef} className="absolute inset-0 agora-video-fill" />
           {rtcErr && (
             <div className="absolute inset-0 grid place-items-center px-8 text-center">
               <div className="rounded-2xl bg-black/40 border border-white/10 px-4 py-3.5 max-w-xs">
@@ -213,11 +226,16 @@ export function Broadcast() {
               </div>
             </div>
           )}
-        </div>
-        <div className="px-4 pb-3 space-y-2">
-          {chat.map((c, i) => (
-            <p key={i} className="text-[13px] w-fit rounded-2xl bg-black/30 px-3 py-1.5"><span className="font-bold">{c.n}</span> {c.t}</p>
-          ))}
+          {/* Floating comments, Instagram/TikTok-live style — they sit over the video and
+              age out on their own (see visibleChat) instead of stacking in a permanent
+              panel that pushes the composer down the screen. */}
+          <div className="absolute inset-x-0 bottom-0 pt-12 pb-2 px-4 flex flex-col justify-end gap-1.5 pointer-events-none bg-gradient-to-t from-black/55 via-black/10 to-transparent">
+            {visibleChat.map((c) => (
+              <p key={c.id} className="text-[13px] w-fit max-w-[86%] rounded-2xl bg-black/35 px-3 py-1.5 animate-fade-in">
+                <span className="font-bold">{c.n}</span> {c.t}
+              </p>
+            ))}
+          </div>
         </div>
         <div className="pb-6 px-4 flex items-center gap-2">
           <button onClick={() => setMic((m) => !m)} className={`h-11 w-11 grid place-items-center rounded-full ${mic ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={mic ? 'mic' : 'mic-off'} size={18} /></button>

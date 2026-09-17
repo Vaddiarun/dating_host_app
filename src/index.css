@@ -30,6 +30,18 @@ body {
   min-width: 0;
 }
 
+/* Agora injects its own <video>/<canvas> node into whatever element we hand .play(), sized off
+ * the camera's native resolution — its own `fit` option doesn't always come through depending on
+ * how the element is mounted, leaving pillarboxed black bars either side. Forcing the injected
+ * node itself to fill its container is the reliable fix regardless of that. */
+.agora-video-fill > video,
+.agora-video-fill > canvas,
+.agora-video-fill > div {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

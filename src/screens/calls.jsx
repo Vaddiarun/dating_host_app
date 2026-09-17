@@ -304,11 +304,11 @@ export function ActiveCall() {
             paints over this PIP once its video fills the full area, hiding the local preview
             entirely (same class of bug as the CallStage blur-div click-through fix). */}
         <div className="absolute top-24 right-4 z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800">
-          <div ref={localVideoRef} className="absolute inset-0" />
+          <div ref={localVideoRef} className="absolute inset-0 agora-video-fill" />
           <button onClick={flipCamera} disabled={flipping} className="absolute bottom-1 right-1 h-7 w-7 grid place-items-center rounded-full bg-black/50 text-white disabled:opacity-50"><Icon name="flip" size={13} /></button>
         </div>
         <div className="flex-1 relative">
-          <div ref={remoteVideoRef} className="absolute inset-0" />
+          <div ref={remoteVideoRef} className="absolute inset-0 agora-video-fill" />
           {!remoteJoined && (
             <div className="absolute inset-0 grid place-items-center">
               {rtcErr ? <p className="text-[13px] text-white/60 px-8 text-center">{rtcErr}</p> : <div className="h-56 w-56 rounded-full bg-white/5" />}
