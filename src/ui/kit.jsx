@@ -5,18 +5,11 @@ import { me } from '../data.js'
 import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 
 /* ============ Phone status bar (mobile only) ============ */
-export function StatusBar({ dark = false }) {
-  const c = dark ? 'text-white' : 'text-ink-900'
-  return (
-    <div className={`lg:hidden flex items-center justify-between px-5 pt-3 pb-1 text-[13px] font-semibold ${c}`}>
-      <span>9:30</span>
-      <div className="flex items-center gap-1.5">
-        <svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor"><path d="M8 2c2.5 0 4.8 1 6.5 2.6l-1 1A8 8 0 0 0 8 3.4 8 8 0 0 0 2.5 5.6l-1-1A9.4 9.4 0 0 1 8 2zm0 3.4c1.5 0 2.9.6 3.9 1.6l-1 1A4.2 4.2 0 0 0 8 6.8c-1.1 0-2.1.4-2.9 1.2l-1-1A5.6 5.6 0 0 1 8 5.4zm0 3.3c.7 0 1.3.3 1.7.8L8 11l-1.7-1.5c.4-.5 1-.8 1.7-.8z" /></svg>
-        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1" /><rect x="5" y="5" width="3" height="7" rx="1" /><rect x="10" y="2.5" width="3" height="9.5" rx="1" /><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4" /></svg>
-        <svg width="24" height="12" viewBox="0 0 24 12" fill="none" stroke="currentColor"><rect x="1" y="1" width="19" height="10" rx="2.5" opacity=".4" /><rect x="3" y="3" width="13" height="6" rx="1" fill="currentColor" stroke="none" /><path d="M22 4v4" strokeWidth="2" strokeLinecap="round" /></svg>
-      </div>
-    </div>
-  )
+/* Real phones already show their own time/signal/battery — this used to render a fake
+ * mock of one (hardcoded "9:30") purely for desktop design-preview purposes. Gutted here
+ * rather than touching every call site individually. */
+export function StatusBar() {
+  return null
 }
 
 /* ============ Mobile headers (hidden on desktop — shell provides TopBar) ============ */
@@ -55,8 +48,8 @@ export const NAV = [
   { to: '/home', icon: 'home', label: 'Home' },
   { to: '/chat', icon: 'chat', label: 'Chat', badge: 3 },
   { to: '/calls', icon: 'phone', label: 'Calls' },
+  { to: '/earnings', icon: 'wallet', label: 'Wallet' },
   { to: '/live', icon: 'live', label: 'Live' },
-  { to: '/earnings', icon: 'wallet', label: 'Earnings' },
 ]
 
 export function BottomNav() {
@@ -74,6 +67,20 @@ export function BottomNav() {
         </NavLink>
       ))}
     </nav>
+  )
+}
+
+/* ============ Floating "Go Live" pill (mobile only) ============ */
+export function FloatingGoLive() {
+  const nav = useNavigate()
+  return (
+    <button
+      onClick={() => nav('/live')}
+      className="lg:hidden fixed bottom-[86px] right-5 z-40 flex items-center gap-1.5 rounded-full bg-brand-600 text-white pl-3.5 pr-4 py-2.5 shadow-pop active:scale-95"
+    >
+      <Icon name="live" size={15} />
+      <span className="text-[13px] font-bold">Go Live</span>
+    </button>
   )
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { PlainHeader, Avatar, Segmented, ErrorCard } from '../ui/kit.jsx'
@@ -54,6 +54,7 @@ function Thread({ conv }) {
   const [sendErr, setSendErr] = useState('')
   const recipientId = conv.otherParticipant?.id
   const name = conv.otherParticipant?.name || conv.otherParticipant?.phone || 'User'
+  const bottomRef = useRef(null)
 
   const load = useCallback(() => {
     setErr('')
@@ -63,6 +64,8 @@ function Thread({ conv }) {
   }, [conv.id])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }) }, [messages])
 
   useEffect(() => {
     if (!recipientId) return
@@ -111,6 +114,7 @@ function Thread({ conv }) {
             </div>
           </div>
         ))}
+        <div ref={bottomRef} />
       </div>
 
       {sendErr && <p className="shrink-0 px-4 pb-1 text-[12px] text-rose-500 bg-white">{sendErr}</p>}

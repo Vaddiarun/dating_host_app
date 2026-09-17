@@ -230,7 +230,10 @@ export function ActiveCall() {
           return
         }
         if (mediaType === 'video') {
-          user.videoTrack?.play(remoteVideoRef.current)
+          // Explicit `fit: 'cover'` — left unset, the SDK letterboxes the remote feed
+          // (black bars either side) whenever its captured aspect ratio doesn't match
+          // this container's; cover crops to fill instead, like every other call UI.
+          user.videoTrack?.play(remoteVideoRef.current, { fit: 'cover' })
           setRemoteJoined(true)
         } else if (mediaType === 'audio') {
           user.audioTrack?.play()
@@ -240,7 +243,7 @@ export function ActiveCall() {
       .then((session) => {
         if (cancelled) { leaveChannel(session); return }
         sessionRef.current = session
-        session.localVideoTrack?.play(localVideoRef.current)
+        session.localVideoTrack?.play(localVideoRef.current, { fit: 'cover' })
       })
       .catch((e) => { console.error('Agora join failed:', e); setRtcErr(errorMessage(e, 'Could not start the camera/mic for this call.')) })
     return () => {
@@ -296,7 +299,11 @@ export function ActiveCall() {
           </div>
           {callErr && <p className="text-[12px] text-rose-300 px-1">{callErr}</p>}
         </div>
-        <div className="absolute top-24 right-4 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800">
+        {/* z-20: both this and the remote container below are positioned elements with no
+            explicit stacking order, so without it the remote container — later in DOM order —
+            paints over this PIP once its video fills the full area, hiding the local preview
+            entirely (same class of bug as the CallStage blur-div click-through fix). */}
+        <div className="absolute top-24 right-4 z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800">
           <div ref={localVideoRef} className="absolute inset-0" />
           <button onClick={flipCamera} disabled={flipping} className="absolute bottom-1 right-1 h-7 w-7 grid place-items-center rounded-full bg-black/50 text-white disabled:opacity-50"><Icon name="flip" size={13} /></button>
         </div>

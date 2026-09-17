@@ -18,13 +18,13 @@ const MAXW = {
 export function AppLayout({ children, title, back, bottomNav = true, bg = 'canvas', maxW = 'lg', pad = true }) {
   const bgClass = bg === 'white' ? 'bg-white' : 'bg-canvas'
   return (
-    <div className="min-h-[100dvh] w-full lg:flex bg-white">
+    <div className="h-[100dvh] overflow-hidden lg:h-auto lg:min-h-[100dvh] lg:overflow-visible w-full lg:flex bg-white">
       <SideNav />
-      <div className="flex min-h-[100dvh] w-full flex-col lg:flex-1 lg:min-w-0">
+      <div className="flex h-full lg:h-auto w-full flex-col lg:flex-1 lg:min-w-0">
         <StatusBar />
         <DesktopTopBar title={title} back={back} />
-        <main className={`flex-1 overflow-y-auto overflow-x-hidden no-scrollbar ${bgClass} lg:bg-canvas`}>
-          <div className={`w-full min-w-0 lg:mx-auto ${MAXW[maxW]} ${pad ? 'lg:px-8 lg:py-8' : ''}`}>{children}</div>
+        <main className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar ${bgClass} lg:bg-canvas`}>
+          <div className={`w-full min-w-0 h-full flex flex-col lg:h-auto lg:block lg:mx-auto ${MAXW[maxW]} ${pad ? 'lg:px-8 lg:py-8' : ''}`}>{children}</div>
         </main>
         {bottomNav && <BottomNav />}
       </div>

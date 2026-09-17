@@ -180,19 +180,20 @@ export function Otp() {
   )
 }
 
+const ONBOARDING_STEPS = ['Profile', 'Audition', 'KYC', 'Payout']
 function Steps({ active }) {
-  const s = ['Profile', 'KYC', 'Payout']
+  const last = ONBOARDING_STEPS.length - 1
   return (
     <div className="flex items-center px-2 py-4">
-      {s.map((label, i) => (
-        <div key={label} className={`flex items-center ${i < 2 ? 'flex-1' : ''}`}>
+      {ONBOARDING_STEPS.map((label, i) => (
+        <div key={label} className={`flex items-center ${i < last ? 'flex-1' : ''}`}>
           <div className="flex flex-col items-center gap-1">
             <span className={`h-7 w-7 grid place-items-center rounded-full text-[12px] font-bold ${i <= active ? 'bg-brand-600 text-white' : 'bg-black/10 text-ink-400'}`}>
               {i < active ? <Icon name="check" size={14} /> : i + 1}
             </span>
             <span className={`text-[11px] font-semibold ${i <= active ? 'text-ink-900' : 'text-ink-400'}`}>{label}</span>
           </div>
-          {i < 2 && <div className={`h-0.5 flex-1 mx-1 -mt-4 ${i < active ? 'bg-brand-600' : 'bg-black/10'}`} />}
+          {i < last && <div className={`h-0.5 flex-1 mx-1 -mt-4 ${i < active ? 'bg-brand-600' : 'bg-black/10'}`} />}
         </div>
       ))}
     </div>
@@ -219,7 +220,7 @@ export function ProfileSetup() {
       const updated = await profileApi.updateMe({ name: name.trim(), email: email.trim() || undefined, languages: langs })
       await profileApi.updateHostProfile({ bio: bio.trim() || undefined, languages: langs })
       setMe({ ...updated, hostProfile: { ...me?.hostProfile, bio, languages: langs } })
-      nav('/onboarding/kyc')
+      nav('/onboarding/audition')
     } catch (e) {
       setErr(errorMessage(e, 'Could not save your profile.'))
     } finally {
@@ -267,7 +268,7 @@ export function KycIntro() {
       <StatusBar />
       <TopBar title="Verification" />
       <div className="flex-1 px-5 lg:px-6">
-        <Steps active={1} />
+        <Steps active={2} />
         <div className="flex flex-col items-center text-center mt-2">
           <IconBadge name="shield-check" tone="brand" size={56} />
           <h2 className="mt-3 text-[22px] font-extrabold text-ink-900">Verify to start earning</h2>
@@ -283,6 +284,174 @@ export function KycIntro() {
         </div>
       </div>
       <div className="p-4"><button onClick={() => nav('/onboarding/documents')} className="btn-primary">Start verification</button></div>
+    </CenterLayout>
+  )
+}
+
+const AUDITION_MAX_SECONDS = 60
+
+/* 4b — Live audition video */
+export function LiveAudition() {
+  const nav = useNavigate()
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
+  const recorderRef = useRef(null)
+  const chunksRef = useRef([])
+  const timerRef = useRef(null)
+  const [phase, setPhase] = useState('opening') // opening | live | recording | recorded
+  const [elapsed, setElapsed] = useState(0)
+  const [recordedBlob, setRecordedBlob] = useState(null)
+  const [recordedUrl, setRecordedUrl] = useState('')
+  const [camErr, setCamErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const stopStream = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+  }
+
+  const startCamera = async () => {
+    setPhase('opening')
+    setCamErr('')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true })
+      streamRef.current = stream
+      setPhase('live')
+    } catch (e) {
+      setCamErr(errorMessage(e, 'Camera unavailable — check permissions.'))
+    }
+  }
+
+  useEffect(() => { startCamera(); return () => { stopStream(); clearInterval(timerRef.current) } }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The <video> element only exists once `phase` leaves "opening" — attach the stream
+  // here, after that render has committed, same pattern as SelfieCamera above.
+  useEffect(() => {
+    if (phase === 'live' && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current
+      videoRef.current.play().catch(() => {})
+    }
+  }, [phase])
+
+  const stopRecording = () => {
+    clearInterval(timerRef.current)
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop()
+  }
+
+  const startRecording = () => {
+    if (!streamRef.current || !window.MediaRecorder) return
+    chunksRef.current = []
+    const mimeType = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+      .find((t) => MediaRecorder.isTypeSupported?.(t)) || ''
+    const recorder = new MediaRecorder(streamRef.current, mimeType ? { mimeType } : undefined)
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'video/webm' })
+      setRecordedBlob(blob)
+      setRecordedUrl(URL.createObjectURL(blob))
+      setPhase('recorded')
+      stopStream()
+    }
+    recorderRef.current = recorder
+    recorder.start()
+    setElapsed(0)
+    setPhase('recording')
+    timerRef.current = setInterval(() => {
+      setElapsed((s) => {
+        if (s + 1 >= AUDITION_MAX_SECONDS) { stopRecording(); return AUDITION_MAX_SECONDS }
+        return s + 1
+      })
+    }, 1000)
+  }
+
+  const reRecord = () => {
+    if (recordedUrl) URL.revokeObjectURL(recordedUrl)
+    setRecordedBlob(null)
+    setRecordedUrl('')
+    setElapsed(0)
+    setErr('')
+    startCamera()
+  }
+
+  const submit = async () => {
+    if (!recordedBlob) return
+    setBusy(true)
+    setErr('')
+    try {
+      // No dedicated audition-video endpoint exists on the backend yet — this reuses the
+      // same presigned-upload mechanism KYC documents already use, so the recording really
+      // does land in real storage. What's still missing server-side is a call to register
+      // it against the host's profile/application once it's there.
+      const { uploadUrl } = await profileApi.getKycUploadUrl(recordedBlob.type || 'video/webm')
+      await profileApi.uploadKycFile(uploadUrl, recordedBlob)
+      nav('/onboarding/kyc')
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not submit your video. Try again.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
+  const ss = String(elapsed % 60).padStart(2, '0')
+  const recording = phase === 'recording'
+  const recorded = phase === 'recorded'
+
+  return (
+    <CenterLayout>
+      <StatusBar />
+      <TopBar title="Live audition video" />
+      <div className="flex-1 overflow-y-auto px-5 lg:px-6 no-scrollbar">
+        <Steps active={1} />
+        <div className="rounded-xl bg-brand-50 px-3.5 py-3 flex items-start gap-2 text-[12px] text-brand-700">
+          <Icon name="video" size={15} className="mt-0.5 shrink-0" /> Record a short video introducing yourself. Please state where you're from.
+        </div>
+
+        <div className="relative mt-4 aspect-[4/3] rounded-2xl overflow-hidden bg-gradient-to-br from-brand-500 to-night-800">
+          {recorded ? (
+            <>
+              <video src={recordedUrl} className="absolute inset-0 h-full w-full object-cover" muted playsInline />
+              <span className="absolute inset-0 grid place-items-center">
+                <span className="grid place-items-center h-14 w-14 rounded-full bg-emerald-500 text-white"><Icon name="check" size={26} /></span>
+              </span>
+              <span className="absolute bottom-3 left-3 pill bg-black/50 text-white text-[12px]">Recorded · {mm}:{ss} / 01:00</span>
+            </>
+          ) : (
+            <>
+              {phase !== 'opening' && (
+                <video ref={videoRef} muted playsInline className="absolute inset-0 h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+              )}
+              <span className="absolute top-3 left-3 pill bg-black/50 text-white text-[12px]">{recording ? 'REC' : 'LIVE CAMERA'}</span>
+              <span className="absolute top-3 right-3 pill bg-black/50 text-white text-[12px]">{mm}:{ss} / 01:00</span>
+              <button
+                onClick={recording ? stopRecording : startRecording}
+                disabled={phase !== 'live' && !recording}
+                className="absolute bottom-3 left-1/2 -translate-x-1/2 h-12 w-12 rounded-full bg-white grid place-items-center disabled:opacity-40"
+                aria-label={recording ? 'Stop recording' : 'Start recording'}
+              >
+                <span className={recording ? 'bg-rose-500 h-4 w-4 rounded-sm' : 'bg-rose-500 h-9 w-9 rounded-full'} />
+              </button>
+            </>
+          )}
+        </div>
+        {camErr && <p className="text-[12px] text-rose-500 mt-2">{camErr}</p>}
+
+        {!recorded && <p className="text-[11px] text-ink-400 text-center mt-2">Recording stops automatically after 1 minute.</p>}
+
+        {recorded && (
+          <div className="mt-3 rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[12px] text-emerald-700 flex items-center gap-2">
+            <Icon name="check" size={14} /> Your live recording is ready to submit.
+          </div>
+        )}
+
+        <ErrorCard message={err} compact className="mt-3" />
+      </div>
+
+      <div className="p-4 grid grid-cols-2 gap-3">
+        <button onClick={reRecord} disabled={phase === 'opening'} className="btn-outline disabled:opacity-40"><Icon name="refresh" size={16} /> Re-record</button>
+        <button onClick={submit} disabled={!recorded || busy} className="btn-primary disabled:opacity-40">{busy ? 'Submitting…' : <><Icon name="chevron-right" size={16} /> Submit video</>}</button>
+      </div>
     </CenterLayout>
   )
 }
@@ -615,7 +784,7 @@ export function PayoutAccount({ standalone }) {
       <StatusBar />
       <TopBar title="Payout account" />
       <div className="flex-1 overflow-y-auto px-5 lg:px-6 no-scrollbar">
-        <Steps active={2} />
+        <Steps active={3} />
         {body}
       </div>
       <div className="p-4"><button onClick={submit} disabled={busy || !formValid} className="btn-primary disabled:opacity-60">{busy ? 'Saving…' : 'Save account'}</button></div>
@@ -704,12 +873,21 @@ export function Verified() {
 export function Rejected() {
   const nav = useNavigate()
   const [reason, setReason] = useState('')
-  useEffect(() => { profileApi.getKycStatus().then((k) => setReason(k.rejectionReason || '')).catch(() => {}) }, [])
+  const [reviewedAt, setReviewedAt] = useState('')
+  useEffect(() => {
+    profileApi.getKycStatus().then((k) => {
+      setReason(k.rejectionReason || '')
+      setReviewedAt(k.reviewedAt || k.updatedAt || '')
+    }).catch(() => {})
+  }, [])
+  const reviewedLabel = reviewedAt
+    ? new Date(reviewedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })
+    : ''
   return (
     <CenterLayout>
       <StatusBar />
       <div className="flex-1 py-10">
-        <ResultScreen tone="rose" icon="x" title="Verification rejected">
+        <ResultScreen tone="rose" icon="x" title="Verification rejected" desc={reviewedLabel ? `Reviewed on ${reviewedLabel}` : undefined}>
           <div className="rounded-xl bg-rose-50 px-3.5 py-3 text-left">
             <p className="text-[14px] font-semibold text-rose-500 flex items-center gap-2"><Icon name="alert" size={15} /> {reason || 'Documents did not pass review'}</p>
             <p className="text-[12px] text-rose-400 mt-1">Retake in bright light with the full document in frame.</p>

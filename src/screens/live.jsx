@@ -149,7 +149,7 @@ export function Broadcast() {
       .then((session) => {
         if (cancelled) { leaveChannel(session); return }
         sessionRef.current = session
-        session.localVideoTrack?.play(videoContainerRef.current)
+        session.localVideoTrack?.play(videoContainerRef.current, { fit: 'cover' })
         session.localAudioTrack?.setEnabled(mic)
       })
       .catch((e) => { console.error('Agora join failed:', e); setRtcErr(errorMessage(e, 'Could not start the camera/mic for this broadcast.')) })

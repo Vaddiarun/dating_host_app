@@ -2,8 +2,9 @@ import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 
 import RequireAuth, { RequireApproved } from './state/RequireAuth.jsx'
 import RealtimeBridge from './state/RealtimeBridge.jsx'
-import { Splash, Login, Otp, ProfileSetup, KycIntro, DocumentUpload, PayoutAccount, UnderReview, Verified, Rejected } from './screens/onboarding.jsx'
+import { Splash, Login, Otp, ProfileSetup, LiveAudition, KycIntro, DocumentUpload, PayoutAccount, UnderReview, Verified, Rejected } from './screens/onboarding.jsx'
 import Home from './screens/home.jsx'
+import { TopSpenders, TopPerformers } from './screens/leaderboard.jsx'
 import { CallsList, IncomingCall, Connecting, ActiveCall, CallSummary } from './screens/calls.jsx'
 import { ChatList, ChatConvo } from './screens/chat.jsx'
 import { GoLive, Broadcast, LiveSummary } from './screens/live.jsx'
@@ -27,6 +28,7 @@ export default function App() {
 
       <Route element={<RequireAuth><Outlet /></RequireAuth>}>
         <Route path="/onboarding/profile" element={<ProfileSetup />} />
+        <Route path="/onboarding/audition" element={<LiveAudition />} />
         <Route path="/onboarding/kyc" element={<KycIntro />} />
         <Route path="/onboarding/documents" element={<DocumentUpload />} />
         <Route path="/onboarding/payout" element={<PayoutAccount />} />
@@ -47,6 +49,8 @@ export default function App() {
         {/* The real dashboard — locked until KYC is approved, not just "logged in". */}
         <Route element={<RequireApproved><Outlet /></RequireApproved>}>
           <Route path="/home" element={<Home />} />
+          <Route path="/leaderboard/spenders" element={<TopSpenders />} />
+          <Route path="/leaderboard/performers" element={<TopPerformers />} />
 
           <Route path="/calls" element={<CallsList />} />
           <Route path="/call/incoming" element={<IncomingCall />} />
