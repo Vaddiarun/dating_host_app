@@ -122,6 +122,7 @@ export function Broadcast() {
   const videoContainerRef = useRef(null)
   const sessionRef = useRef(null)
   const msgIdRef = useRef(0)
+  const endedRef = useRef(false)
 
   // Comments should float over the video and fade away like Instagram/TikTok live —
   // ticking once a second re-derives which ones are still within their visible window
@@ -171,6 +172,18 @@ export function Broadcast() {
 
   useEffect(() => { sessionRef.current?.localAudioTrack?.setEnabled(mic) }, [mic])
 
+  // Leaving this screen any way other than the red "end" button (back button/gesture,
+  // navigating elsewhere, closing the tab) used to only tear down the local Agora session —
+  // the backend broadcast record was never told to end, so it stayed "live" forever and kept
+  // showing as broadcasting everywhere that reads it. Ending it here on unmount too, guarded
+  // by endedRef so it isn't double-sent when the explicit end button already did it.
+  useEffect(() => () => {
+    if (!endedRef.current && broadcastId) {
+      endedRef.current = true
+      liveApi.end(broadcastId).catch(() => {})
+    }
+  }, [broadcastId])
+
   const flipCamera = async () => {
     if (!sessionRef.current?.localVideoTrack) return
     setFlipping(true)
@@ -199,6 +212,7 @@ export function Broadcast() {
 
   const end = async () => {
     setEnding(true)
+    endedRef.current = true
     if (sessionRef.current) await leaveChannel(sessionRef.current)
     try {
       if (broadcastId) await liveApi.end(broadcastId)
@@ -209,9 +223,9 @@ export function Broadcast() {
 
   return (
     <ImmersiveLayout>
-      <div className="mx-auto flex min-h-[100dvh] max-w-[520px] flex-col text-white bg-gradient-to-b from-night-700 via-night-800 to-night-900">
+      <div className="flex min-h-[100dvh] w-full flex-col text-white bg-gradient-to-b from-night-700 via-night-800 to-night-900">
         <StatusBar dark />
-        <div className="px-4 flex items-center gap-2">
+        <div className="w-full max-w-[480px] mx-auto px-4 flex items-center gap-2">
           <span className="pill bg-black/40 text-white text-[12px]"><Avatar name="You" size={22} /> You <span className="text-rose-400 font-bold">● LIVE</span></span>
           <span className="pill bg-black/40 text-white text-[12px]"><Icon name="eye" size={12} /> {viewerCount}</span>
           <button onClick={flipCamera} disabled={flipping} className="ml-auto h-9 w-9 grid place-items-center rounded-full bg-black/40 text-white disabled:opacity-50"><Icon name="flip" size={16} /></button>
@@ -229,15 +243,17 @@ export function Broadcast() {
           {/* Floating comments, Instagram/TikTok-live style — they sit over the video and
               age out on their own (see visibleChat) instead of stacking in a permanent
               panel that pushes the composer down the screen. */}
-          <div className="absolute inset-x-0 bottom-0 pt-12 pb-2 px-4 flex flex-col justify-end gap-1.5 pointer-events-none bg-gradient-to-t from-black/55 via-black/10 to-transparent">
-            {visibleChat.map((c) => (
-              <p key={c.id} className="text-[13px] w-fit max-w-[86%] rounded-2xl bg-black/35 px-3 py-1.5 animate-fade-in">
-                <span className="font-bold">{c.n}</span> {c.t}
-              </p>
-            ))}
+          <div className="absolute inset-x-0 bottom-0 pt-12 pb-2 flex justify-center pointer-events-none bg-gradient-to-t from-black/55 via-black/10 to-transparent">
+            <div className="w-full max-w-[480px] px-4 flex flex-col justify-end gap-1.5">
+              {visibleChat.map((c) => (
+                <p key={c.id} className="text-[13px] w-fit max-w-[86%] rounded-2xl bg-black/35 px-3 py-1.5 animate-fade-in">
+                  <span className="font-bold">{c.n}</span> {c.t}
+                </p>
+              ))}
+            </div>
           </div>
         </div>
-        <div className="pb-6 px-4 flex items-center gap-2">
+        <div className="w-full max-w-[480px] mx-auto pb-6 px-4 flex items-center gap-2">
           <button onClick={() => setMic((m) => !m)} className={`h-11 w-11 grid place-items-center rounded-full ${mic ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={mic ? 'mic' : 'mic-off'} size={18} /></button>
           <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Say something…" className="flex-1 rounded-full bg-white/15 border border-white/10 px-4 py-2.5 text-[14px] text-white placeholder:text-white/60 outline-none" />
           <button onClick={sendChat} className="h-11 w-11 grid place-items-center rounded-full bg-white/12"><Icon name="send" size={19} /></button>

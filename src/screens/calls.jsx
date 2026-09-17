@@ -8,6 +8,7 @@ import { rupees, clockTime, dayLabel } from '../lib/format.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { errorMessage } from '../lib/errors.js'
+import { playRingtone } from '../lib/sound.js'
 
 /* 15 — Calls list */
 export function CallsList() {
@@ -78,15 +79,18 @@ export function CallsList() {
   )
 }
 
-/* Shared shell for full-bleed call screens */
+/* Shared shell for full-bleed call screens. The background/gradient always fills the
+ * whole viewport (no more black bars either side on wide desktop windows) — only the
+ * actual content column is capped and centered, so buttons don't stretch to the screen
+ * edges on a big monitor. */
 function CallStage({ children }) {
   return (
     <ImmersiveLayout>
-      <div className="relative mx-auto flex min-h-[100dvh] max-w-[520px] flex-col overflow-hidden text-white bg-gradient-to-b from-night-700 via-night-800 to-night-900">
+      <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden text-white bg-gradient-to-b from-night-700 via-night-800 to-night-900">
         <div className="pointer-events-none absolute -top-20 left-1/4 h-56 w-56 rounded-full bg-brand-500/30 blur-3xl" />
         <div className="pointer-events-none absolute bottom-0 right-0 h-64 w-64 rounded-full bg-gold-400/10 blur-3xl" />
         <StatusBar dark />
-        {children}
+        <div className="relative flex flex-1 flex-col w-full max-w-[480px] mx-auto">{children}</div>
       </div>
     </ImmersiveLayout>
   )
@@ -101,6 +105,10 @@ export function IncomingCall() {
   const [err, setErr] = useState('')
   const rate = sp.get('rate')
   const callerName = sp.get('callerName') || 'Caller'
+
+  // Rings until the host actually acts on it — accept/decline below stop it explicitly,
+  // and leaving this screen any other way stops it via this same cleanup.
+  useEffect(() => playRingtone(), [])
 
   const accept = async () => {
     if (!callId) { nav('/call/connecting'); return }
@@ -289,9 +297,9 @@ export function ActiveCall() {
 
   return (
     <ImmersiveLayout>
-      <div className="relative mx-auto flex min-h-[100dvh] max-w-[520px] flex-col overflow-hidden text-white bg-gradient-to-b from-night-700 to-night-900">
+      <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden text-white bg-gradient-to-b from-night-700 to-night-900">
         <StatusBar dark />
-        <div className="px-4 space-y-2">
+        <div className="w-full max-w-[480px] mx-auto px-4 space-y-2">
           <div className="rounded-2xl bg-white/8 backdrop-blur px-3.5 py-2.5 flex items-center gap-3 border border-white/10">
             <Avatar name={callerName} size={38} />
             <div className="flex-1"><p className="text-[15px] font-semibold">{callerName}</p><p className="text-[12px] text-white/60">{mm}:{ss} · HD</p></div>
@@ -315,7 +323,7 @@ export function ActiveCall() {
             </div>
           )}
         </div>
-        <div className="pb-8 px-6 flex items-center justify-between">
+        <div className="w-full max-w-[480px] mx-auto pb-8 px-6 flex items-center justify-between">
           <button onClick={() => setMuted((m) => !m)} className={`h-12 w-12 grid place-items-center rounded-full ${muted ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name={muted ? 'mic-off' : 'mic'} size={20} /></button>
           <button onClick={() => setCam((c) => !c)} className={`h-12 w-12 grid place-items-center rounded-full ${cam ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={cam ? 'video' : 'camera-off'} size={20} /></button>
           <button onClick={() => nav('/gift/ask/call', { state: { userId: call?.userId } })} className="h-12 w-12 grid place-items-center rounded-full bg-white/12"><Icon name="gift" size={20} /></button>

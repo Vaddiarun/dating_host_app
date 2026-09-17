@@ -3,7 +3,6 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { Avatar, Toggle, SectionTitle, ErrorCard } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
-import { queue } from '../data.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 import { earnings as earningsApi, presence as presenceApi } from '../api/index.js'
@@ -67,23 +66,6 @@ function RecentCard({ items }) {
             <Avatar name={c.counterpartName || 'User'} size={40} />
             <div className="flex-1 min-w-0"><p className="text-[15px] font-semibold text-ink-900 truncate">{c.counterpartName || 'User'}</p><p className="text-[12px] text-ink-400 truncate capitalize">{c.type} call · {c.status}</p></div>
             <div className="text-right"><p className="text-[14px] font-bold text-emerald-600">+ {rupees(c.totalAmountPaise)}</p><p className="text-[11px] text-ink-300">{clockTime(c.createdAt)}</p></div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function QueueCard({ title, items }) {
-  return (
-    <div>
-      <SectionTitle className="mb-2">{title}</SectionTitle>
-      <div className="card divide-y divide-black/5 px-4">
-        {items.map((q, i) => (
-          <div key={q.name} className="flex items-center gap-3 py-3">
-            <Avatar name={q.name} size={40} />
-            <div className="flex-1"><p className="text-[15px] font-semibold text-ink-900">{q.name}</p><p className="text-[12px] text-ink-400">{title === 'Queue' ? 'Waiting' : 'Queued'} · {q.kind}</p></div>
-            <span className={`pill ${i === 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-gold-50 text-gold-600'}`}>{q.status}</span>
           </div>
         ))}
       </div>
@@ -186,9 +168,6 @@ export default function Home() {
   }[state]
 
   const showBalance = state === 'online'
-  const q1 = state === 'call'
-    ? { title: 'Waiting', items: [{ name: 'Dev', kind: 'Voice', status: 'Waiting' }, { name: 'Imran', kind: 'Video', status: '2nd' }] }
-    : { title: 'Queue', items: queue }
 
   return (
     <AppLayout tab="/home" title={`Dashboard · ${label}`} maxW="xl" bg="canvas">
@@ -248,7 +227,6 @@ export default function Home() {
 
           {/* right rail */}
           <div className="space-y-4">
-            {(state === 'online' || state === 'call') && <QueueCard {...q1} />}
             {state === 'online' && (
               <div className="grid grid-cols-2 gap-3">
                 <button onClick={() => nav('/call/incoming')} className="btn-outline text-[13px]">Preview call</button>
