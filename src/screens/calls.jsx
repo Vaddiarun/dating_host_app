@@ -108,8 +108,24 @@ export function IncomingCall() {
   const callerName = sp.get('callerName') || 'Caller'
 
   // Rings until the host actually acts on it — accept/decline below stop it explicitly,
-  // and leaving this screen any other way stops it via this same cleanup.
-  useEffect(() => playRingtone(), [])
+  // and leaving this screen any other way stops it via this same cleanup. Vibration is a
+  // supplementary nudge alongside it (e.g. phone on silent) — harmless no-op on devices/
+  // browsers without the API (most desktop browsers, iOS Safari).
+  useEffect(() => {
+    const stopRing = playRingtone()
+    let vibeTimer = null
+    if (navigator.vibrate) {
+      const pattern = [400, 200, 400, 1000]
+      navigator.vibrate(pattern)
+      const total = pattern.reduce((a, b) => a + b, 0)
+      vibeTimer = setInterval(() => navigator.vibrate(pattern), total)
+    }
+    return () => {
+      stopRing()
+      clearInterval(vibeTimer)
+      navigator.vibrate?.(0)
+    }
+  }, [])
 
   const accept = async () => {
     if (!callId) { nav('/call/connecting'); return }
@@ -208,6 +224,7 @@ export function ActiveCall() {
   const [remoteJoined, setRemoteJoined] = useState(false)
   const [flipping, setFlipping] = useState(false)
   const [giftOpen, setGiftOpen] = useState(false)
+  const [mainView, setMainView] = useState('remote') // 'remote' | 'local' — tap either tile to swap
   const remoteVideoRef = useRef(null)
   const localVideoRef = useRef(null)
   const sessionRef = useRef(null)
@@ -335,30 +352,56 @@ export function ActiveCall() {
     <ImmersiveLayout>
       <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden text-white bg-gradient-to-b from-night-700 to-night-900">
         <StatusBar dark />
-        <div className="w-full max-w-[480px] mx-auto px-4 space-y-2">
-          <div className="rounded-2xl bg-white/8 backdrop-blur px-3.5 py-2.5 flex items-center gap-3 border border-white/10">
-            <Avatar name={callerName} size={38} />
-            <div className="flex-1"><p className="text-[15px] font-semibold">{callerName}</p><p className="text-[12px] text-white/60">{mm}:{ss} · HD</p></div>
-            <span className="text-[13px] font-bold text-gold-300">{estBeans} Beans</span>
+        <div className="w-full max-w-[480px] mx-auto px-4 pt-2 space-y-2">
+          {/* bg-black/45 (not the near-invisible white/8 this used to be) so the card actually
+              reads as a distinct floating element against an equally-dark video background,
+              instead of blending into it as a flat full-width strip. */}
+          <div className="rounded-2xl bg-black/45 backdrop-blur-md shadow-lg shadow-black/30 px-3.5 py-2.5 flex items-center gap-3 border border-white/10">
+            <Avatar name={callerName} size={38} className="ring-2 ring-white/15" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[15px] font-semibold truncate">{callerName}</p>
+              <p className="text-[11.5px] text-white/55 flex items-center gap-1.5 mt-0.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {mm}:{ss} · HD
+              </p>
+            </div>
+            <span className="flex items-center gap-1.5 shrink-0 rounded-full bg-gold-400/15 border border-gold-400/25 px-2.5 py-1.5 text-[13px] font-bold text-gold-300">
+              <Icon name="gift" size={13} /> {estBeans}
+            </span>
           </div>
           {callErr && <p className="text-[12px] text-rose-300 px-1">{callErr}</p>}
         </div>
-        {/* z-20: both this and the remote container below are positioned elements with no
-            explicit stacking order, so without it the remote container — later in DOM order —
-            paints over this PIP once its video fills the full area, hiding the local preview
-            entirely (same class of bug as the CallStage blur-div click-through fix). */}
-        <div className="absolute top-24 right-4 z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800">
+        {/* Tap either tile to swap which one is full-screen — same pattern as FaceTime/Zoom's
+            PIP. Whichever is the small tile stays `absolute` with an explicit z-20; the big
+            one is a plain in-flow `flex-1 relative` — that z-gap is what keeps the small tile
+            painting on top regardless of which video (local/remote) it currently holds (see
+            the stacking-order note this was originally added for). */}
+        <button
+          onClick={() => mainView === 'remote' && setMainView('local')}
+          className={mainView === 'local'
+            ? 'flex-1 relative w-full text-left'
+            : 'absolute top-24 right-4 z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800'}
+        >
           <div ref={localVideoRef} className="absolute inset-0 agora-video-fill" />
-          <button onClick={flipCamera} disabled={flipping} className="absolute bottom-1 right-1 h-7 w-7 grid place-items-center rounded-full bg-black/50 text-white disabled:opacity-50"><Icon name="flip" size={13} /></button>
-        </div>
-        <div className="flex-1 relative">
+          <span
+            onClick={(e) => { e.stopPropagation(); flipCamera() }}
+            className={`absolute grid place-items-center rounded-full bg-black/50 text-white ${mainView === 'local' ? 'bottom-4 right-4 h-10 w-10' : 'bottom-1 right-1 h-7 w-7'} ${flipping ? 'opacity-50' : ''}`}
+          >
+            <Icon name="flip" size={mainView === 'local' ? 16 : 13} />
+          </span>
+        </button>
+        <button
+          onClick={() => mainView === 'local' && setMainView('remote')}
+          className={mainView === 'remote'
+            ? 'flex-1 relative w-full text-left'
+            : 'absolute top-24 right-4 z-20 h-40 w-28 rounded-2xl overflow-hidden bg-black text-left'}
+        >
           <div ref={remoteVideoRef} className="absolute inset-0 agora-video-fill" />
           {!remoteJoined && (
             <div className="absolute inset-0 grid place-items-center">
               {rtcErr ? <p className="text-[13px] text-white/60 px-8 text-center">{rtcErr}</p> : <div className="h-56 w-56 rounded-full bg-white/5" />}
             </div>
           )}
-        </div>
+        </button>
         <div className="w-full max-w-[480px] mx-auto pb-8 px-6 flex items-center justify-between">
           <button onClick={() => setMuted((m) => !m)} className={`h-12 w-12 grid place-items-center rounded-full ${muted ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name={muted ? 'mic-off' : 'mic'} size={20} /></button>
           <button onClick={() => setCam((c) => !c)} className={`h-12 w-12 grid place-items-center rounded-full ${cam ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={cam ? 'video' : 'camera-off'} size={20} /></button>

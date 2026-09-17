@@ -283,29 +283,41 @@ export function GiftRequestSheet({ userId, onClose }) {
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center animate-fade-in">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-[480px] bg-white rounded-t-3xl p-5 pt-4 text-ink-900 animate-sheet-up max-h-[80dvh] overflow-y-auto no-scrollbar">
-        <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-black/15" />
-        <div className="flex items-center justify-between">
-          <h3 className="text-[17px] font-bold">Ask for a gift</h3>
-          <button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-full bg-black/5 text-ink-500"><Icon name="x" size={15} /></button>
+      {/* Fixed-height single frame, not a scroll-to-find-the-button sheet: the gift grid is
+          the only part that scrolls (flex-1 min-h-0) — note input and Send are a pinned
+          footer, always on screen the moment the sheet opens. Previously everything (title,
+          grid, note, Send) sat in one scrolling column, so on a short viewport Send could sit
+          below the fold and needed a scroll/drag to even reach. */}
+      <div className="relative w-full max-w-[480px] bg-white rounded-t-3xl text-ink-900 animate-sheet-up max-h-[75dvh] flex flex-col">
+        <div className="shrink-0 p-5 pb-3">
+          <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-black/15" />
+          <div className="flex items-center justify-between">
+            <h3 className="text-[17px] font-bold">Ask for a gift</h3>
+            <button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-full bg-black/5 text-ink-500"><Icon name="x" size={15} /></button>
+          </div>
         </div>
+
         {sent ? (
-          <p className="text-[13px] text-emerald-600 font-semibold mt-3 flex items-center gap-2"><Icon name="check" size={16} /> Request sent!</p>
+          <p className="px-5 pb-5 text-[13px] text-emerald-600 font-semibold flex items-center gap-2"><Icon name="check" size={16} /> Request sent!</p>
         ) : (
           <>
-            {catalog.length === 0 && <ErrorCard message={catalogErr} onRetry={loadCatalog} className="mt-2.5" />}
-            <div className="grid grid-cols-3 gap-2.5 mt-2.5">
-              {catalog.map((g) => (
-                <button key={g.id} onClick={() => setPick(g.id)} className={`rounded-2xl border py-2.5 flex flex-col items-center gap-0.5 ${pick === g.id ? 'border-gold-400 bg-gold-50' : 'border-black/10'}`}>
-                  <span className="text-xl">🎁</span>
-                  <span className="text-[13px] font-semibold text-center px-1">{g.name}</span>
-                  <span className="text-[12px] font-bold text-gold-500">{(g.pricePaise / 100).toLocaleString('en-IN')}</span>
-                </button>
-              ))}
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 no-scrollbar">
+              {catalog.length === 0 && <ErrorCard message={catalogErr} onRetry={loadCatalog} />}
+              <div className="grid grid-cols-3 gap-2.5 pb-3">
+                {catalog.map((g) => (
+                  <button key={g.id} onClick={() => setPick(g.id)} className={`rounded-2xl border py-2.5 flex flex-col items-center gap-0.5 ${pick === g.id ? 'border-gold-400 bg-gold-50' : 'border-black/10'}`}>
+                    <span className="text-xl">🎁</span>
+                    <span className="text-[13px] font-semibold text-center px-1">{g.name}</span>
+                    <span className="text-[12px] font-bold text-gold-500">{(g.pricePaise / 100).toLocaleString('en-IN')}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a sweet note…" className="input mt-2.5" />
-            {sendErr && <p className="text-[12px] text-rose-500 mt-2">{sendErr}</p>}
-            <button onClick={send} disabled={busy || !pick} className="btn-gold mt-2.5 disabled:opacity-60"><Icon name="gift" size={16} /> {busy ? 'Sending…' : 'Send request'}</button>
+            <div className="shrink-0 p-5 pt-3 border-t border-black/5">
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a sweet note…" className="input" />
+              {sendErr && <p className="text-[12px] text-rose-500 mt-2">{sendErr}</p>}
+              <button onClick={send} disabled={busy || !pick} className="btn-gold mt-2.5 disabled:opacity-60"><Icon name="gift" size={16} /> {busy ? 'Sending…' : 'Send request'}</button>
+            </div>
           </>
         )}
       </div>

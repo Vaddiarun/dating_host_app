@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext.jsx'
 import { getSocket, onSocketEvent } from '../lib/socket.js'
+import { unlockAudio } from '../lib/sound.js'
 import Icon from '../ui/Icon.jsx'
 
 /** Mounted once at the app root while authed. Turns the backend's realtime push
@@ -11,6 +12,21 @@ export default function RealtimeBridge() {
   const { status, refreshMe } = useAuth()
   const nav = useNavigate()
   const [toast, setToast] = useState(null)
+
+  // The incoming-call ringtone fires from an async socket push, with no click/tap happening
+  // at that exact moment — a browser only lets audio actually play if its AudioContext was
+  // resumed from inside a real user gesture, so without this the ring would be silently
+  // dropped the very first time a call comes in. Any tap/keypress anywhere in the app while
+  // logged in warms it up ahead of time, well before a real call needs it.
+  useEffect(() => {
+    if (status !== 'authed') return
+    window.addEventListener('pointerdown', unlockAudio)
+    window.addEventListener('keydown', unlockAudio)
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio)
+      window.removeEventListener('keydown', unlockAudio)
+    }
+  }, [status])
 
   useEffect(() => {
     if (status !== 'authed') return

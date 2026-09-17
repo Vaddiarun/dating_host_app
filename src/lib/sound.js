@@ -7,6 +7,18 @@ function getCtx() {
 }
 
 /**
+ * Browsers create every AudioContext in a "suspended" state until it's resumed from inside
+ * a real user gesture (click/tap/key) — resuming it from an async event handler (like a
+ * socket push for an incoming call, which is exactly when the ringtone needs to fire) is
+ * silently ignored, so the ring never actually plays even though nothing throws. Call this
+ * once from any real tap/click anywhere in the app (see RealtimeBridge, mounted at the root)
+ * so the context is already running long before a real call arrives.
+ */
+export function unlockAudio() {
+  getCtx().resume?.().catch(() => {})
+}
+
+/**
  * Classic two-tone ring, repeating every ~2s, until stopped. Call the returned function to
  * silence it (call answered/declined, or the incoming-call screen was left another way).
  * Browsers block audio until the page has had some user interaction — if this is the very
