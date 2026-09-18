@@ -5,7 +5,7 @@ import { StatusBar, PlainHeader, Avatar, Toggle } from '../ui/kit.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
 import { live as liveApi } from '../api/index.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
-import { getBeautySettings, filterForIntensity } from '../lib/beautyFilter.js'
+import { getBeautySettings, openBeautyCamera } from '../lib/beautyFilter.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { ErrorCard } from '../ui/kit.jsx'
 import { errorMessage } from '../lib/errors.js'
@@ -21,25 +21,49 @@ export function GoLive() {
   const [err, setErr] = useState('')
   const videoRef = useRef(null)
   const streamRef = useRef(null)
+  const beautyCamRef = useRef(null) // set only when the beauty pipeline is actually in use
   const [camReady, setCamReady] = useState(false)
   const [camErr, setCamErr] = useState('')
   const [facingMode, setFacingMode] = useState('user')
   const [flipping, setFlipping] = useState(false)
   const beauty = getBeautySettings()
+  const useBeautyCam = beauty.enabled
 
-  const openCamera = (mode) => {
-    return navigator.mediaDevices?.getUserMedia?.({ video: { facingMode: mode }, audio: true })
-      .then((stream) => {
-        streamRef.current?.getTracks().forEach((t) => t.stop())
-        streamRef.current = stream
-        stream.getAudioTracks().forEach((t) => { t.enabled = mic })
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          videoRef.current.play().catch(() => {})
-        }
-        setCamReady(true)
-        setCamErr('')
-      })
+  // This used to be a raw getUserMedia preview with a flat CSS blur standing in for the real
+  // filter — a whole-frame blur (background, everything) rather than the actual face-only
+  // processing, which looked like a bug (blurry background) even though it was "by design."
+  // Running the real pipeline here instead means this setup screen shows exactly what the
+  // broadcast will actually look like, camera-flip included, not an approximation of it.
+  const openCamera = async (mode) => {
+    if (useBeautyCam) {
+      const cam = await openBeautyCamera({ facingMode: mode, settings: beauty, audio: true })
+      beautyCamRef.current = cam
+      cam.audioTrack && (cam.audioTrack.enabled = mic)
+      if (videoRef.current) {
+        videoRef.current.srcObject = cam.stream
+        videoRef.current.play().catch(() => {})
+      }
+      setCamReady(true)
+      setCamErr('')
+      return
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: true })
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = stream
+    stream.getAudioTracks().forEach((t) => { t.enabled = mic })
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream
+      videoRef.current.play().catch(() => {})
+    }
+    setCamReady(true)
+    setCamErr('')
+  }
+
+  const stopCamera = () => {
+    beautyCamRef.current?.stop()
+    beautyCamRef.current = null
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
   }
 
   useEffect(() => {
@@ -47,11 +71,12 @@ export function GoLive() {
     openCamera('user').catch((e) => !cancelled && setCamErr(errorMessage(e, 'Camera unavailable — check permissions.')))
     return () => {
       cancelled = true
-      streamRef.current?.getTracks().forEach((t) => t.stop())
+      stopCamera()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (beautyCamRef.current) { beautyCamRef.current.audioTrack && (beautyCamRef.current.audioTrack.enabled = mic); return }
     streamRef.current?.getAudioTracks().forEach((t) => { t.enabled = mic })
   }, [mic])
 
@@ -59,7 +84,11 @@ export function GoLive() {
     setFlipping(true)
     const next = facingMode === 'user' ? 'environment' : 'user'
     try {
-      await openCamera(next)
+      if (beautyCamRef.current) {
+        await beautyCamRef.current.switchCamera() // same track object, canvas keeps streaming — no re-attach needed
+      } else {
+        await openCamera(next)
+      }
       setFacingMode(next)
     } catch (e) {
       setCamErr(errorMessage(e, 'Could not switch cameras.'))
@@ -73,7 +102,7 @@ export function GoLive() {
     setErr('')
     try {
       const res = await liveApi.start(title.trim() || 'Live stream')
-      streamRef.current?.getTracks().forEach((t) => t.stop()) // release the preview camera; Broadcast opens its own Agora tracks
+      stopCamera() // release the preview camera; Broadcast opens its own (Agora-published) one
       nav(`/live/broadcast?broadcastId=${res.broadcastId}`, { state: { channelName: res.channelName, agoraToken: res.agoraToken, micOn: mic, giftsOn: gifts } })
     } catch (e) {
       setErr(errorMessage(e, 'Could not start the broadcast.'))
@@ -93,14 +122,7 @@ export function GoLive() {
               playsInline
               muted
               className="absolute inset-0 h-full w-full object-cover"
-              style={{
-                transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
-                // CSS-only preview of the beauty filter — cheap since nothing here gets
-                // published or recorded; the actual broadcast video runs the real canvas
-                // pipeline once you start (see Broadcast below), this is just so the preview
-                // matches what viewers will actually see.
-                filter: beauty.enabled && beauty.preset.id !== 'none' ? filterForIntensity(beauty.preset.intensity / 100) : undefined,
-              }}
+              style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
             />
           )}
           <div className="absolute inset-x-3 bottom-3 flex items-center justify-between">
