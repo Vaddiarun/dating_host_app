@@ -5,6 +5,7 @@ import { StatusBar, PlainHeader, Avatar, Toggle } from '../ui/kit.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
 import { live as liveApi } from '../api/index.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
+import { getBeautySettings, filterForIntensity } from '../lib/beautyFilter.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { ErrorCard } from '../ui/kit.jsx'
 import { errorMessage } from '../lib/errors.js'
@@ -24,6 +25,7 @@ export function GoLive() {
   const [camErr, setCamErr] = useState('')
   const [facingMode, setFacingMode] = useState('user')
   const [flipping, setFlipping] = useState(false)
+  const beauty = getBeautySettings()
 
   const openCamera = (mode) => {
     return navigator.mediaDevices?.getUserMedia?.({ video: { facingMode: mode }, audio: true })
@@ -85,7 +87,22 @@ export function GoLive() {
       <PlainHeader title="Go live" />
       <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
         <div className="relative aspect-[4/3] lg:aspect-video rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-brand-700">
-          {camReady && <video ref={videoRef} playsInline muted className="absolute inset-0 h-full w-full object-cover" style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }} />}
+          {camReady && (
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{
+                transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
+                // CSS-only preview of the beauty filter — cheap since nothing here gets
+                // published or recorded; the actual broadcast video runs the real canvas
+                // pipeline once you start (see Broadcast below), this is just so the preview
+                // matches what viewers will actually see.
+                filter: beauty.enabled && beauty.preset.id !== 'none' ? filterForIntensity(beauty.preset.intensity / 100) : undefined,
+              }}
+            />
+          )}
           <div className="absolute inset-x-3 bottom-3 flex items-center justify-between">
             <span className="pill bg-black/40 text-white text-[12px]">{camErr ? camErr : camReady ? 'Camera ready · HD' : 'Starting camera…'}</span>
             <button onClick={flipCamera} disabled={flipping || !camReady} className="h-9 w-9 grid place-items-center rounded-full bg-black/40 text-white disabled:opacity-50"><Icon name="flip" size={16} /></button>
@@ -178,7 +195,7 @@ export function Broadcast() {
         // issues a PUBLISHER-role token for the host (live.routes.ts) — that only actually
         // grants publish rights under Agora's Live Broadcasting profile, which plain 'rtc'
         // mode ignores.
-        promise: joinAndPublish({ channelName, token: agoraToken, uid: me?.id, mode: 'live', role: 'host' }),
+        promise: joinAndPublish({ channelName, token: agoraToken, uid: me?.id, mode: 'live', role: 'host', beautySettings: getBeautySettings() }),
       }
     }
 
@@ -250,7 +267,7 @@ export function Broadcast() {
     if (!sessionRef.current?.localVideoTrack) return
     setFlipping(true)
     try {
-      const switched = await switchToNextCamera(sessionRef.current.localVideoTrack)
+      const switched = await switchToNextCamera(sessionRef.current.localVideoTrack, sessionRef.current.beautyCamera)
       if (switched === null) setRtcErr('Only one camera is available on this device.')
     } catch (e) {
       setRtcErr(errorMessage(e, 'Could not switch cameras.'))

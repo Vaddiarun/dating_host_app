@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import { auth as authApi, profile as profileApi } from '../api/index.js'
 import { getTokens, clearTokens } from '../api/client.js'
 import { connectSocket, disconnectSocket } from '../lib/socket.js'
+import { setBeautySettings } from '../lib/beautyFilter.js'
 
 const AuthContext = createContext(null)
 
@@ -54,6 +55,16 @@ export function AuthProvider({ children }) {
     if (status === 'authed') connectSocket()
     else if (status === 'guest') disconnectSocket()
   }, [status])
+
+  // The server is now the source of truth for beauty settings once a host has saved them
+  // once (hostProfile.beautySettings), so a login on a new device/browser picks up their
+  // saved look immediately instead of starting from defaults — this just keeps the local
+  // cache every camera pipeline reads (lib/beautyFilter.js) in sync with whatever /me returns,
+  // regardless of which of the several places below set `me`.
+  useEffect(() => {
+    const remote = me?.hostProfile?.beautySettings
+    if (remote) setBeautySettings(remote)
+  }, [me])
 
   const requestOtp = useCallback(async (phone) => {
     setPendingPhone(phone)

@@ -54,6 +54,10 @@ export const profile = {
 
   getNotificationPreferences: () => apiFetch('/me/notification-preferences'),
   updateNotificationPreferences: (data) => apiFetch('/me/notification-preferences', { method: 'PATCH', body: data }),
+
+  // Full replace, not a merge — always send the complete beauty-settings object. Echoed back
+  // on GET /me as hostProfile.beautySettings (null until the host saves it once).
+  updateBeautySettings: (data) => apiFetch('/me/beauty-settings', { method: 'PATCH', body: data }),
 }
 
 export const presence = {

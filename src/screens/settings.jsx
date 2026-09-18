@@ -48,6 +48,7 @@ export function Settings() {
             <Row icon="trending-up" tone="brand" title="Performance" sub="Meter, livestream score & leaderboards" onClick={() => nav('/settings/performance')} />
             <Row icon="settings" tone="brand" title="Edit profile" sub="Name, bio, languages" onClick={() => nav('/settings/edit-profile')} />
             <Row icon="image" tone="brand" title="Gallery" sub="Photos & videos" onClick={() => nav('/settings/gallery')} />
+            <Row icon="sparkles" tone="gold" title="Beauty filter" sub="Smooth your camera in calls & live" onClick={() => nav('/settings/beauty-filter')} />
             <Row icon="wallet" tone="gold" title="Rate settings" sub={videoRate ? `${rupees(videoRate)}/min video` : 'Set your rates'} onClick={() => nav('/settings/rates')} />
             <Row icon="shield-check" tone="green" title="KYC status" sub={me?.kycStatus?.replace('_', ' ')} right={<span className="pill bg-emerald-50 text-emerald-600 text-[11px] capitalize">{me?.kycStatus?.replace('_', ' ')}</span>} onClick={() => nav('/settings/kyc')} />
             <Row icon="card" tone="brand" title="Payout details" onClick={() => nav('/settings/payouts')} />

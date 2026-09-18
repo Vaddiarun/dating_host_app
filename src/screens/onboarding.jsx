@@ -7,6 +7,7 @@ import { useAuth, resolveEntryRoute } from '../state/AuthContext.jsx'
 import { profile as profileApi } from '../api/index.js'
 import { errorMessage } from '../lib/errors.js'
 import { referenceCode } from '../lib/format.js'
+import { getBeautySettings, openBeautyCamera } from '../lib/beautyFilter.js'
 
 /* 1 — Splash */
 export function Splash() {
@@ -295,6 +296,7 @@ export function LiveAudition() {
   const nav = useNavigate()
   const videoRef = useRef(null)
   const streamRef = useRef(null)
+  const beautyRef = useRef(null)
   const recorderRef = useRef(null)
   const chunksRef = useRef([])
   const timerRef = useRef(null)
@@ -309,14 +311,24 @@ export function LiveAudition() {
   const stopStream = () => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
+    beautyRef.current?.stop()
+    beautyRef.current = null
   }
 
   const startCamera = async () => {
     setPhase('opening')
     setCamErr('')
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true })
-      streamRef.current = stream
+      const beauty = getBeautySettings()
+      if (beauty.enabled) {
+        // Recorded (not just previewed) — so this needs the real processed track, not a
+        // CSS-only preview filter, or the submitted video wouldn't actually show the effect.
+        const cam = await openBeautyCamera({ settings: beauty, audio: true })
+        beautyRef.current = cam
+        streamRef.current = cam.stream
+      } else {
+        streamRef.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true })
+      }
       setPhase('live')
     } catch (e) {
       setCamErr(errorMessage(e, 'Camera unavailable — check permissions.'))

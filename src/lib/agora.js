@@ -1,4 +1,5 @@
 import { inflate } from 'pako'
+import { openBeautyCamera } from './beautyFilter.js'
 
 // Loaded on demand — the SDK is a big chunk (~500KB) that only calls and live
 // broadcasts need, not every page in the app.
@@ -40,7 +41,7 @@ export function appIdFromToken(token) {
  * SUBSCRIBER per role (live.routes.ts), but that encoding does nothing under plain 'rtc'
  * mode, which is what every join used to request regardless of call vs. broadcast.
  */
-export async function joinAndPublish({ channelName, token, uid, video = true, mode = 'rtc', role, onRemoteUser } = {}) {
+export async function joinAndPublish({ channelName, token, uid, video = true, mode = 'rtc', role, beautySettings, onRemoteUser } = {}) {
   const RTC = await sdk()
   RTC.setLogLevel(4) // errors only — the SDK is chatty at its default level
   const appId = appIdFromToken(token)
@@ -58,16 +59,30 @@ export async function joinAndPublish({ channelName, token, uid, video = true, mo
   await client.join(appId, channelName, token, uid ?? null)
 
   const localAudioTrack = await RTC.createMicrophoneAudioTrack()
-  const localVideoTrack = video ? await RTC.createCameraVideoTrack() : null
+  let localVideoTrack = null
+  let beautyCamera = null
+  if (video) {
+    if (beautySettings?.enabled) {
+      // audio: false — the mic is already handled by createMicrophoneAudioTrack above;
+      // opening it a second time here would race two getUserMedia calls for the same
+      // device, which is exactly the class of NOT_READABLE bug fixed earlier for the
+      // camera itself.
+      beautyCamera = await openBeautyCamera({ settings: beautySettings, audio: false })
+      localVideoTrack = RTC.createCustomVideoTrack({ mediaStreamTrack: beautyCamera.videoTrack })
+    } else {
+      localVideoTrack = await RTC.createCameraVideoTrack()
+    }
+  }
   await client.publish([localAudioTrack, localVideoTrack].filter(Boolean))
 
-  return { client, localAudioTrack, localVideoTrack }
+  return { client, localAudioTrack, localVideoTrack, beautyCamera }
 }
 
-export async function leaveChannel({ client, localAudioTrack, localVideoTrack } = {}) {
+export async function leaveChannel({ client, localAudioTrack, localVideoTrack, beautyCamera } = {}) {
   try {
     if (localAudioTrack) { localAudioTrack.stop(); localAudioTrack.close() }
     if (localVideoTrack) { localVideoTrack.stop(); localVideoTrack.close() }
+    beautyCamera?.stop()
     await client?.leave()
   } catch {
     // best-effort — we're tearing down regardless
@@ -76,8 +91,17 @@ export async function leaveChannel({ client, localAudioTrack, localVideoTrack } 
 
 /** Switches a published local camera track to the next available camera (front/back on
  * mobile, whatever's next in the list on desktop) without dropping the publish. Returns the
- * deviceId now in use, or null if there's only one camera to switch to. */
-export async function switchToNextCamera(localVideoTrack) {
+ * deviceId now in use, or null if there's only one camera to switch to.
+ * `beautyCamera`, when the session was opened with a beauty filter, drives the swap instead —
+ * a custom video track built from a canvas stream has no Agora-native `setDevice()` to call,
+ * so the underlying camera is reopened directly and the published track's source is swapped
+ * with `replaceTrack` instead. */
+export async function switchToNextCamera(localVideoTrack, beautyCamera) {
+  if (beautyCamera) {
+    await beautyCamera.switchCamera()
+    await localVideoTrack.replaceTrack(beautyCamera.videoTrack)
+    return 'switched'
+  }
   const RTC = await sdk()
   const cameras = await RTC.getCameras()
   if (cameras.length < 2) return null

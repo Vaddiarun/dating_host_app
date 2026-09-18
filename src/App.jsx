@@ -6,6 +6,7 @@ import { Splash, Login, Otp, ProfileSetup, LiveAudition, KycIntro, DocumentUploa
 import Home from './screens/home.jsx'
 import { TopSpenders, TopPerformers } from './screens/leaderboard.jsx'
 import Performance from './screens/performance.jsx'
+import { BeautySettings } from './screens/beautySettings.jsx'
 import { CallsList, IncomingCall, Connecting, ActiveCall, CallSummary } from './screens/calls.jsx'
 import { ChatList, ChatConvo } from './screens/chat.jsx'
 import { GoLive, Broadcast, LiveSummary } from './screens/live.jsx'
@@ -39,6 +40,7 @@ export default function App() {
 
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/performance" element={<Performance />} />
+        <Route path="/settings/beauty-filter" element={<BeautySettings />} />
         <Route path="/settings/kyc" element={<KycStatus />} />
         <Route path="/settings/edit-profile" element={<EditProfile />} />
         <Route path="/settings/rates" element={<RateSettings />} />

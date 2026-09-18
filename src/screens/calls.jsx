@@ -7,6 +7,7 @@ import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
 import { calls as callsApi, earnings as earningsApi } from '../api/index.js'
 import { rupees, clockTime, dayLabel } from '../lib/format.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
+import { getBeautySettings } from '../lib/beautyFilter.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { errorMessage } from '../lib/errors.js'
 import { playRingtone } from '../lib/sound.js'
@@ -261,6 +262,7 @@ export function ActiveCall() {
           channelName,
           token: agoraToken,
           uid: me?.id,
+          beautySettings: getBeautySettings(),
           onRemoteUser: (user, mediaType, left) => {
             // Agora fires this once per media type (audio and video publish/
             // subscribe independently) — this used to bail out entirely for
@@ -316,7 +318,7 @@ export function ActiveCall() {
     if (!sessionRef.current?.localVideoTrack) return
     setFlipping(true)
     try {
-      const switched = await switchToNextCamera(sessionRef.current.localVideoTrack)
+      const switched = await switchToNextCamera(sessionRef.current.localVideoTrack, sessionRef.current.beautyCamera)
       if (switched === null) setRtcErr('Only one camera is available on this device.')
     } catch (e) {
       setRtcErr(errorMessage(e, 'Could not switch cameras.'))

@@ -1,9 +1,45 @@
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { Avatar, Segmented, FloatingGoLive } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { compactBeans } from '../lib/format.js'
+
+/** One-shot coin-rain on open — purely decorative, so it unmounts itself once the last coin
+ * has fallen rather than sitting in the DOM (or running its animation loop) forever. */
+function CoinRain() {
+  const [show, setShow] = useState(true)
+  // Spread over a ~3.5s window with a 2-2.5s fall each — last coin starts around 3.5s and
+  // lands around 6s total.
+  const coins = useMemo(() => Array.from({ length: 30 }, (_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    size: 16 + Math.random() * 16,
+    duration: 2 + Math.random() * 0.5,
+    delay: Math.random() * 3.5,
+  })), [])
+
+  useEffect(() => {
+    const last = Math.max(...coins.map((c) => c.delay + c.duration))
+    const t = setTimeout(() => setShow(false), (last + 0.3) * 1000)
+    return () => clearTimeout(t)
+  }, [coins])
+
+  if (!show) return null
+  return (
+    <div className="fixed inset-0 z-50 pointer-events-none overflow-hidden">
+      {coins.map((c) => (
+        <span
+          key={c.id}
+          className="absolute top-0 drop-shadow"
+          style={{ left: `${c.left}%`, fontSize: c.size, animation: `coin-fall ${c.duration}s ${c.delay}s linear forwards` }}
+        >
+          🪙
+        </span>
+      ))}
+    </div>
+  )
+}
 
 /* No leaderboard endpoint exists on the backend yet — these are placeholder rankings so the
  * screen can be built and reviewed now; swap for a real /leaderboard fetch once it exists. */
@@ -110,7 +146,7 @@ function Row({ rank, p }) {
   )
 }
 
-function Leaderboard({ title, data }) {
+function Leaderboard({ title, data, coinRain }) {
   const [week, setWeek] = useState('This Week')
   const list = data[week]
   const top3 = list.slice(0, 3)
@@ -118,6 +154,7 @@ function Leaderboard({ title, data }) {
 
   return (
     <AppLayout title={title} back maxW="lg" bg="white" pad={false}>
+      {coinRain && <CoinRain />}
       <div className="lg:hidden bg-gradient-to-br from-brand-700 via-brand-800 to-night-900 rounded-b-3xl">
         <Header title={title} />
         <div className="flex justify-center px-5 pt-3">
@@ -145,9 +182,9 @@ function Leaderboard({ title, data }) {
 }
 
 export function TopSpenders() {
-  return <Leaderboard title="Top Spenders" data={SPENDERS} altTo="/leaderboard/performers" altLabel="Top Performers" />
+  return <Leaderboard title="Top Spenders" data={SPENDERS} coinRain />
 }
 
 export function TopPerformers() {
-  return <Leaderboard title="Top Performers" data={PERFORMERS} altTo="/leaderboard/spenders" altLabel="Top Spenders" />
+  return <Leaderboard title="Top Performers" data={PERFORMERS} />
 }
