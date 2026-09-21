@@ -228,6 +228,9 @@ export function Gallery() {
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState('')
   const [addErr, setAddErr] = useState('')
+  const [broken, setBroken] = useState(() => new Set())
+  const [viewing, setViewing] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const fileRef = useRef(null)
 
   const load = () => { setErr(''); profileApi.listGallery().then((res) => setItems(res.items || [])).catch((e) => setErr(errorMessage(e, 'Could not load your gallery.'))).finally(() => setLoading(false)) }
@@ -268,8 +271,16 @@ export function Gallery() {
   }
 
   const remove = async (id) => {
-    setItems((prev) => prev.filter((t) => t.id !== id))
-    try { await profileApi.deleteGalleryItem(id) } catch (e) { setErr(errorMessage(e, 'Could not remove that item.')); load() }
+    setDeleting(true)
+    try {
+      await profileApi.deleteGalleryItem(id)
+      setItems((prev) => prev.filter((t) => t.id !== id))
+      setViewing(null)
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not remove that item.'))
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -309,13 +320,26 @@ export function Gallery() {
             {uploading ? <Icon name="refresh" size={20} className="animate-spinslow" /> : <Icon name="plus" size={22} />}
           </button>
           {!loading && filtered.map((t) => (
-            <button key={t.id} onClick={() => remove(t.id)} className="relative aspect-square rounded-2xl overflow-hidden bg-gradient-to-br from-brand-300/60 to-gold-300/50 grid place-items-center group">
-              {t.mediaType === 'video' ? (
-                <span className="h-9 w-9 grid place-items-center rounded-full bg-black/30 text-white">▶</span>
+            // Tapping used to delete instantly, no confirmation, no way to see it full-size
+            // first — now it opens the viewer below; deleting only happens from an explicit
+            // button there.
+            <button key={t.id} onClick={() => setViewing(t)} className="relative aspect-square rounded-2xl overflow-hidden bg-gradient-to-br from-brand-300/60 to-gold-300/50 grid place-items-center">
+              {broken.has(t.id) ? (
+                <span className="flex flex-col items-center gap-1 text-ink-500/70 px-2 text-center">
+                  <Icon name="alert" size={18} />
+                  <span className="text-[10px] font-semibold">Couldn't load</span>
+                </span>
+              ) : t.mediaType === 'video' ? (
+                <>
+                  {/* preload="metadata" gets the browser to paint the video's first frame as
+                      a real thumbnail — previously every video showed the same blank gradient
+                      with a play icon, indistinguishable from each other. */}
+                  <video src={t.url} className="absolute inset-0 h-full w-full object-cover" muted playsInline preload="metadata" onError={() => setBroken((s) => new Set(s).add(t.id))} />
+                  <span className="absolute h-9 w-9 grid place-items-center rounded-full bg-black/40 text-white pointer-events-none">▶</span>
+                </>
               ) : (
-                <img src={t.url} alt="" className="absolute inset-0 h-full w-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                <img src={t.url} alt="" className="absolute inset-0 h-full w-full object-cover" onError={() => setBroken((s) => new Set(s).add(t.id))} />
               )}
-              <span className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/40 grid place-items-center text-white text-[11px] font-semibold transition">Remove</span>
             </button>
           ))}
         </div>
@@ -324,6 +348,34 @@ export function Gallery() {
         </div>
         {!adding && <button onClick={() => setAdding(true)} className="mt-3 text-[12px] font-semibold text-brand-600">or add by URL instead</button>}
       </div>
+
+      {viewing && (
+        <div className="fixed inset-0 z-[70] bg-black/90 flex flex-col" onClick={() => setViewing(null)}>
+          <div className="flex items-center justify-between p-4">
+            <button onClick={() => setViewing(null)} className="h-10 w-10 grid place-items-center rounded-full bg-white/10 text-white"><Icon name="x" size={18} /></button>
+            <button
+              onClick={(e) => { e.stopPropagation(); remove(viewing.id) }}
+              disabled={deleting}
+              className="flex items-center gap-1.5 rounded-full bg-rose-500 text-white px-4 py-2 text-[13px] font-semibold disabled:opacity-60"
+            >
+              <Icon name="ban" size={15} /> {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+          <div className="flex-1 grid place-items-center px-4 pb-4" onClick={(e) => e.stopPropagation()}>
+            {broken.has(viewing.id) ? (
+              <div className="text-center text-white/70">
+                <Icon name="alert" size={28} className="mx-auto" />
+                <p className="text-[13px] mt-2">This {viewing.mediaType} couldn't be loaded.</p>
+                <p className="text-[11px] mt-1 break-all opacity-60">{viewing.url}</p>
+              </div>
+            ) : viewing.mediaType === 'video' ? (
+              <video src={viewing.url} className="max-h-full max-w-full rounded-xl" controls autoPlay playsInline onError={() => setBroken((s) => new Set(s).add(viewing.id))} />
+            ) : (
+              <img src={viewing.url} alt="" className="max-h-full max-w-full rounded-xl object-contain" onError={() => setBroken((s) => new Set(s).add(viewing.id))} />
+            )}
+          </div>
+        </div>
+      )}
     </AppLayout>
   )
 }

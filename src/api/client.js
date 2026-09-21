@@ -146,12 +146,28 @@ export async function apiDownload(path, { query, filename } = {}, retry = true) 
 
 /** Uploads a file straight to the presigned S3 URL returned by /me/kyc/upload-url. No auth header. */
 export async function uploadToPresignedUrl(uploadUrl, file) {
-  const res = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type || 'application/octet-stream' },
-    body: file,
-  })
-  if (!res.ok) throw new ApiError('Upload failed', res.status)
+  let res
+  try {
+    res = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    })
+  } catch {
+    // fetch itself throwing (not a non-2xx response) means the request never reached S3 at
+    // all — almost always a CORS rejection or no network, not "the upload failed" server-side.
+    throw new ApiError('Could not reach the upload server — check your connection and try again.', 0)
+  }
+  if (!res.ok) {
+    // S3 returns an XML error body (e.g. <Error><Code>AccessDenied</Code><Message>...) — surface
+    // whatever it actually says instead of a generic "Upload failed" that hides the real cause.
+    let detail = ''
+    try {
+      const text = await res.text()
+      detail = /<Message>(.*?)<\/Message>/.exec(text)?.[1] || /<Code>(.*?)<\/Code>/.exec(text)?.[1] || ''
+    } catch { /* body unreadable — fall through with just the status */ }
+    throw new ApiError(detail ? `Upload failed: ${detail}` : `Upload failed (${res.status} ${res.statusText})`, res.status)
+  }
   return true
 }
 

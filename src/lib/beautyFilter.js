@@ -135,11 +135,25 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
   const cheekLayerCtx = cheekLayerCanvas.getContext('2d')
   const cheekMaskCanvas = makeCanvas(w, h)
   const cheekMaskCtx = cheekMaskCanvas.getContext('2d')
+  // Edge-aware smoothing scratch canvases — see buildEdgeAwareSmoothed() below for what each
+  // one holds at each step.
+  const diffCanvas = makeCanvas(w, h)
+  const diffCtx = diffCanvas.getContext('2d')
+  const diffBoostCanvas = makeCanvas(w, h)
+  const diffBoostCtx = diffBoostCanvas.getContext('2d')
+  const alphaMaskCanvas = makeCanvas(w, h)
+  const alphaMaskCtx = alphaMaskCanvas.getContext('2d')
+  const sharpLayerCanvas = makeCanvas(w, h)
+  const sharpLayerCtx = sharpLayerCanvas.getContext('2d')
+  const edgeAwareCanvas = makeCanvas(w, h)
+  const edgeAwareCtx = edgeAwareCanvas.getContext('2d')
+  const preFilterCanvas = makeCanvas(w, h)
+  const preFilterCtx = preFilterCanvas.getContext('2d')
 
   const resize = () => {
     w = video.videoWidth || 640
     h = video.videoHeight || 480
-    for (const c of [baseCanvas, outputCanvas, blurCanvas, fineBlurCanvas, layerCanvas, maskCanvas, eyeLayerCanvas, eyeMaskCanvas, cheekLayerCanvas, cheekMaskCanvas]) {
+    for (const c of [baseCanvas, outputCanvas, blurCanvas, fineBlurCanvas, layerCanvas, maskCanvas, eyeLayerCanvas, eyeMaskCanvas, cheekLayerCanvas, cheekMaskCanvas, diffCanvas, diffBoostCanvas, alphaMaskCanvas, sharpLayerCanvas, edgeAwareCanvas, preFilterCanvas]) {
       c.width = w
       c.height = h
     }
@@ -147,14 +161,100 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
   video.addEventListener('loadedmetadata', resize)
   resize()
 
+  // Edge-aware smoothing needs to turn a "how much local detail is here" map into an alpha
+  // channel, which Canvas2D can only do via an SVG luminanceToAlpha filter referenced by
+  // `ctx.filter = 'url(#id)'` — a real, standards-defined capability, but not something to
+  // assume works everywhere. A unique id per camera instance avoids collisions if more than
+  // one is ever open at once (e.g. this settings preview plus something else).
+  const lumFilterId = `lum2alpha-${Math.random().toString(36).slice(2)}`
+  const svgNS = 'http://www.w3.org/2000/svg'
+  const filterSvg = document.createElementNS(svgNS, 'svg')
+  filterSvg.setAttribute('width', '0')
+  filterSvg.setAttribute('height', '0')
+  filterSvg.style.position = 'absolute'
+  const filterEl = document.createElementNS(svgNS, 'filter')
+  filterEl.setAttribute('id', lumFilterId)
+  const feColorMatrix = document.createElementNS(svgNS, 'feColorMatrix')
+  feColorMatrix.setAttribute('type', 'luminanceToAlpha')
+  filterEl.appendChild(feColorMatrix)
+  filterSvg.appendChild(filterEl)
+  document.body.appendChild(filterSvg)
+
+  // One-time capability probe: a mid-gray square run through a working luminanceToAlpha
+  // filter comes out with alpha well below 255; if the browser silently ignores the filter
+  // (drawImage still just copies the source through unfiltered), it stays fully opaque. Real
+  // failure mode this catches: older Safari / unusual embedded WebViews where the SVG filter
+  // reference is accepted but not actually applied.
+  let edgeAwareSupported = true
+  try {
+    const probe = makeCanvas(4, 4)
+    const probeCtx = probe.getContext('2d')
+    probeCtx.fillStyle = 'rgb(60,60,60)'
+    probeCtx.fillRect(0, 0, 4, 4)
+    const out = makeCanvas(4, 4)
+    const outCtxProbe = out.getContext('2d')
+    outCtxProbe.filter = `url(#${lumFilterId})`
+    outCtxProbe.drawImage(probe, 0, 0)
+    outCtxProbe.filter = 'none'
+    const alpha = outCtxProbe.getImageData(1, 1, 1, 1).data[3]
+    edgeAwareSupported = alpha < 200
+  } catch {
+    edgeAwareSupported = false
+  }
+
+  /** Frequency-separation-style edge-aware smoothing: a heavily blurred "low frequency" base
+   * (tone/color, blotchiness) with the original sharp image re-composited on top ONLY where
+   * there was real local detail (an edge, a pore, a hairline) — measured as |original - blur|,
+   * boosted for contrast, then converted to an alpha mask. Flat skin gets fully smoothed;
+   * genuine texture and edges stay sharp, instead of the whole region blurring uniformly. */
+  const buildEdgeAwareSmoothed = (blurPx) => {
+    blurCtx.filter = `blur(${blurPx}px)`
+    blurCtx.drawImage(video, 0, 0, w, h)
+    blurCtx.filter = 'none'
+
+    if (!edgeAwareSupported) return blurCanvas // flat blur only — still correct, just not detail-preserving
+
+    diffCtx.clearRect(0, 0, w, h)
+    diffCtx.drawImage(blurCanvas, 0, 0)
+    diffCtx.globalCompositeOperation = 'difference'
+    diffCtx.drawImage(video, 0, 0, w, h)
+    diffCtx.globalCompositeOperation = 'source-over'
+
+    diffBoostCtx.clearRect(0, 0, w, h)
+    diffBoostCtx.filter = 'contrast(2.6) brightness(1.5)'
+    diffBoostCtx.drawImage(diffCanvas, 0, 0)
+    diffBoostCtx.filter = 'none'
+
+    alphaMaskCtx.clearRect(0, 0, w, h)
+    alphaMaskCtx.filter = `url(#${lumFilterId})`
+    alphaMaskCtx.drawImage(diffBoostCanvas, 0, 0)
+    alphaMaskCtx.filter = 'none'
+
+    sharpLayerCtx.clearRect(0, 0, w, h)
+    sharpLayerCtx.drawImage(video, 0, 0, w, h)
+    sharpLayerCtx.globalCompositeOperation = 'destination-in'
+    sharpLayerCtx.drawImage(alphaMaskCanvas, 0, 0)
+    sharpLayerCtx.globalCompositeOperation = 'source-over'
+
+    edgeAwareCtx.clearRect(0, 0, w, h)
+    edgeAwareCtx.drawImage(blurCanvas, 0, 0)
+    edgeAwareCtx.drawImage(sharpLayerCanvas, 0, 0)
+    return edgeAwareCanvas
+  }
+
   let running = true
   let raf = null
   let faceDetectBroken = false
   let detecting = false
   let lastDetectAt = 0
-  let skinPaths = []
-  let eyePaths = []
-  let cheekPaths = []
+  // Detection runs on its own slower interval (FACE_DETECT_INTERVAL_MS below), but rendering
+  // runs every rAF tick — using the raw detected landmarks directly meant the mask visibly
+  // snapped to a new position every ~120ms instead of tracking smoothly, most noticeable on
+  // any head movement. targetFaces holds the latest raw detection; smoothedFaces eases toward
+  // it a little every single rendered frame, so the mask glides instead of jumping.
+  let targetFaces = []
+  let smoothedFaces = []
+  const LANDMARK_LERP = 0.35
 
   const maybeDetectFaces = () => {
     if (!current.enabled || faceDetectBroken || detecting) return
@@ -164,27 +264,44 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
     detecting = true
     lastDetectAt = now
     detectFaces(video, now)
-      .then((faces) => {
-        skinPaths = faces.map((lm) => skinMaskPath(lm, w, h))
-        eyePaths = faces.map((lm) => eyeMaskPath(lm, w, h))
-        cheekPaths = faces.map((lm) => cheekMaskPath(lm, w, h))
-      })
+      .then((faces) => { targetFaces = faces })
       .catch(() => {
         // Model failed to load (offline, blocked CDN, unsupported browser, ...) — Beauty
         // Effects simply won't have a face to target until this succeeds again; Custom/Filter
         // are unaffected since they never depended on face detection.
         faceDetectBroken = true
-        skinPaths = []
-        eyePaths = []
-        cheekPaths = []
+        targetFaces = []
       })
       .finally(() => { detecting = false })
+  }
+
+  // Eases smoothedFaces toward targetFaces by LANDMARK_LERP each call (once per rendered
+  // frame). A change in how many faces are visible just snaps straight to the new set —
+  // there's nothing sensible to interpolate from when a face appears/disappears.
+  const updateSmoothedFaces = () => {
+    if (smoothedFaces.length !== targetFaces.length) {
+      smoothedFaces = targetFaces.map((face) => face.map((pt) => ({ x: pt.x, y: pt.y })))
+      return
+    }
+    for (let i = 0; i < targetFaces.length; i++) {
+      const target = targetFaces[i]
+      const smoothed = smoothedFaces[i]
+      for (let j = 0; j < target.length; j++) {
+        if (!smoothed[j]) { smoothed[j] = { x: target[j].x, y: target[j].y }; continue }
+        smoothed[j].x += (target[j].x - smoothed[j].x) * LANDMARK_LERP
+        smoothed[j].y += (target[j].y - smoothed[j].y) * LANDMARK_LERP
+      }
+    }
   }
 
   const draw = () => {
     if (!running) return
     if (video.videoWidth) {
       maybeDetectFaces()
+      updateSmoothedFaces()
+      const skinPaths = smoothedFaces.map((lm) => skinMaskPath(lm, w, h))
+      const eyePaths = smoothedFaces.map((lm) => eyeMaskPath(lm, w, h))
+      const cheekPaths = smoothedFaces.map((lm) => cheekMaskPath(lm, w, h))
 
       // 1) base frame
       baseCtx.filter = 'none'
@@ -219,17 +336,16 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
           layerCtx.globalCompositeOperation = 'source-over'
         }
 
-        // Smoothing — a softly blurred copy blended back over the skin mask only. This is the
-        // browser-friendly stand-in for an edge-preserving/bilateral blur: cheap, and the
-        // texture-preservation slider controls how much survives. Blur radius and blend alpha
-        // both scale with intensity now (previously only alpha did, capping out far too subtle).
+        // Smoothing — edge-aware: a heavily blurred base with the original re-composited back
+        // on top wherever there's real local detail (see buildEdgeAwareSmoothed), so flat skin
+        // smooths fully while pores/edges/hairline stay defined, instead of blurring
+        // everything by the same amount. Blur radius and blend alpha both scale with intensity.
         if (p.smoothing) {
           const texPres = p.texturePreservation ?? 0.8
           const blurPx = (4 + 6 * pk) * (1 - texPres * 0.25)
-          blurCtx.filter = `blur(${blurPx.toFixed(2)}px)`
-          blurCtx.drawImage(video, 0, 0, w, h)
+          const smoothed = buildEdgeAwareSmoothed(blurPx)
           layerCtx.globalAlpha = Math.min(1, p.smoothing * pk * 2.2)
-          layerCtx.drawImage(blurCanvas, 0, 0)
+          layerCtx.drawImage(smoothed, 0, 0)
           layerCtx.globalAlpha = 1
         }
         // "Acne Removal"/"Skin Texture" fine-detail pass — a smaller-radius blur blended at
@@ -334,8 +450,14 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
       const filter = getColorFilter(current.filterId)
       if (filter.id !== 'none') {
         if (filter.css) {
+          // outputCanvas was drawn onto itself here before (outCtx.drawImage(outputCanvas,...)
+          // while outCtx IS outputCanvas's own context) — reading and writing the same bitmap
+          // in one call is exactly the kind of thing that can silently misbehave depending on
+          // the browser. Routing through a separate snapshot canvas removes any ambiguity.
+          preFilterCtx.clearRect(0, 0, w, h)
+          preFilterCtx.drawImage(outputCanvas, 0, 0)
           outCtx.filter = filter.css
-          outCtx.drawImage(outputCanvas, 0, 0)
+          outCtx.drawImage(preFilterCanvas, 0, 0)
           outCtx.filter = 'none'
         }
         if (filter.tint) {
@@ -394,12 +516,19 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
       await video.play().catch(() => {})
       return next
     },
+    /** How many faces detection currently sees — 0 means Beauty Effects has nothing to apply
+     * to yet (no faces found), separate from `enabled`/preset selection. Exposed so this can
+     * be surfaced in the UI as a direct diagnostic instead of guessing whether "no visible
+     * effect" means "no face found" vs. something else. */
+    get faceCount() { return targetFaces.length },
+    get edgeAwareSupported() { return edgeAwareSupported },
     stop() {
       running = false
       cancelAnimationFrame(raf)
       rawStream.getTracks().forEach((t) => t.stop())
       videoTrack.stop()
       video.srcObject = null
+      filterSvg.remove()
     },
   }
 }

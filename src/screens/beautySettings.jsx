@@ -44,6 +44,7 @@ export function BeautySettings() {
   const [ready, setReady] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [capturedUrl, setCapturedUrl] = useState('')
+  const [faceCount, setFaceCount] = useState(null) // null = not known yet
   const beforeRef = useRef(null)
   const afterRef = useRef(null)
   const camRef = useRef(null)
@@ -64,8 +65,12 @@ export function BeautySettings() {
         setReady(true)
       })
       .catch((e) => setCamErr(errorMessage(e, 'Camera unavailable — check permissions.')))
+    // Direct diagnostic, not a guess — polls whether face detection is actually finding a
+    // face right now, separate from whether a preset is applying visibly.
+    const poll = setInterval(() => { if (camRef.current) setFaceCount(camRef.current.faceCount) }, 400)
     return () => {
       cancelled = true
+      clearInterval(poll)
       camRef.current?.stop()
       if (capturedUrl) URL.revokeObjectURL(capturedUrl)
     }
@@ -150,6 +155,11 @@ export function BeautySettings() {
           <div className="relative aspect-[3/4] rounded-2xl overflow-hidden bg-black">
             <video ref={afterRef} muted playsInline className="absolute inset-0 h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }} />
             <span className="absolute top-2 left-2 pill bg-brand-600 text-white text-[11px]">After</span>
+            {ready && (
+              <span className={`absolute top-2 right-2 pill text-[11px] ${faceCount > 0 ? 'bg-emerald-500/85 text-white' : 'bg-rose-500/85 text-white'}`}>
+                {faceCount > 0 ? `${faceCount} face${faceCount > 1 ? 's' : ''} found` : 'No face found'}
+              </span>
+            )}
             {!ready && !camErr && <div className="absolute inset-0 grid place-items-center bg-black/40"><p className="text-[12px] text-white/80">Starting camera…</p></div>}
             {ready && (
               <button onClick={capture} disabled={capturing} className="absolute bottom-2 right-2 h-8 w-8 grid place-items-center rounded-full bg-white/90 text-ink-900 disabled:opacity-50">
