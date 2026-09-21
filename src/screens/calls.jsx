@@ -225,7 +225,12 @@ export function ActiveCall() {
   const [remoteJoined, setRemoteJoined] = useState(false)
   const [flipping, setFlipping] = useState(false)
   const [giftOpen, setGiftOpen] = useState(false)
-  const [mainView, setMainView] = useState('remote') // 'remote' | 'local' — tap either tile to swap
+  const [mainView, setMainView] = useState('remote') // 'remote' | 'local' — tap the small tile to swap
+  // Freeform drag position for whichever tile is currently the small PIP — like WhatsApp's
+  // draggable self-view bubble, not just a fixed corner. null = default top-right corner.
+  const [pipPos, setPipPos] = useState(null)
+  const stageRef = useRef(null)
+  const dragRef = useRef({ dragging: false, moved: false, startX: 0, startY: 0, origX: 0, origY: 0 })
   const remoteVideoRef = useRef(null)
   const localVideoRef = useRef(null)
   const sessionRef = useRef(null)
@@ -327,6 +332,46 @@ export function ActiveCall() {
     }
   }
 
+  // WhatsApp-style drag: the small PIP tile follows the pointer while held, and only swaps
+  // main/PIP (the old tap behavior) if the pointer never actually moved — so a genuine drag
+  // doesn't also trigger a swap, and a plain tap still works exactly as before.
+  const PIP_W = 112
+  const PIP_H = 160
+  const PIP_MARGIN = 12
+
+  const clampPip = (x, y) => {
+    const rect = stageRef.current?.getBoundingClientRect()
+    if (!rect) return { x, y }
+    return {
+      x: Math.min(Math.max(x, PIP_MARGIN), Math.max(PIP_MARGIN, rect.width - PIP_W - PIP_MARGIN)),
+      // keep clear of the header card up top and the control row at the bottom
+      y: Math.min(Math.max(y, 88), Math.max(88, rect.height - PIP_H - 110)),
+    }
+  }
+
+  const onPipPointerDown = (e) => {
+    const rect = stageRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const origX = pipPos ? pipPos.x : rect.width - PIP_W - 16
+    const origY = pipPos ? pipPos.y : 96
+    dragRef.current = { dragging: true, moved: false, startX: e.clientX, startY: e.clientY, origX, origY }
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+  const onPipPointerMove = (e) => {
+    const d = dragRef.current
+    if (!d.dragging) return
+    const dx = e.clientX - d.startX
+    const dy = e.clientY - d.startY
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) d.moved = true
+    if (d.moved) setPipPos(clampPip(d.origX + dx, d.origY + dy))
+  }
+  const onPipPointerUp = () => {
+    const d = dragRef.current
+    if (!d.dragging) return
+    d.dragging = false
+    if (!d.moved) setMainView((v) => (v === 'remote' ? 'local' : 'remote'))
+  }
+
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
   const ss = String(elapsed % 60).padStart(2, '0')
   const callerName = call?.callerName || navCallerName || 'Caller'
@@ -352,7 +397,7 @@ export function ActiveCall() {
 
   return (
     <ImmersiveLayout>
-      <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden text-white bg-gradient-to-b from-night-700 to-night-900">
+      <div ref={stageRef} className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden text-white bg-gradient-to-b from-night-700 to-night-900">
         <StatusBar dark />
         <div className="w-full max-w-[480px] mx-auto px-4 pt-2 space-y-2">
           {/* bg-black/45 (not the near-invisible white/8 this used to be) so the card actually
@@ -372,30 +417,41 @@ export function ActiveCall() {
           </div>
           {callErr && <p className="text-[12px] text-rose-300 px-1">{callErr}</p>}
         </div>
-        {/* Tap either tile to swap which one is full-screen — same pattern as FaceTime/Zoom's
-            PIP. Whichever is the small tile stays `absolute` with an explicit z-20; the big
-            one is a plain in-flow `flex-1 relative` — that z-gap is what keeps the small tile
-            painting on top regardless of which video (local/remote) it currently holds (see
+        {/* The small PIP tile is freely draggable anywhere on screen — like WhatsApp's
+            self-view bubble — and a plain tap (no movement) still swaps which video is
+            full-screen, same as before. Whichever is small stays `absolute` with an explicit
+            z-20; the big one is a plain in-flow `flex-1 relative` — that z-gap is what keeps
+            the small tile painting on top regardless of which video it currently holds (see
             the stacking-order note this was originally added for). */}
         <button
-          onClick={() => mainView === 'remote' && setMainView('local')}
+          onPointerDown={mainView === 'remote' ? onPipPointerDown : undefined}
+          onPointerMove={mainView === 'remote' ? onPipPointerMove : undefined}
+          onPointerUp={mainView === 'remote' ? onPipPointerUp : undefined}
+          onPointerCancel={mainView === 'remote' ? onPipPointerUp : undefined}
+          style={mainView === 'local' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
           className={mainView === 'local'
             ? 'flex-1 relative w-full text-left'
-            : 'absolute top-24 right-4 z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800'}
+            : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800 cursor-grab active:cursor-grabbing'}
         >
           <div ref={localVideoRef} className="absolute inset-0 agora-video-fill" />
           <span
             onClick={(e) => { e.stopPropagation(); flipCamera() }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
             className={`absolute grid place-items-center rounded-full bg-black/50 text-white ${mainView === 'local' ? 'bottom-4 right-4 h-10 w-10' : 'bottom-1 right-1 h-7 w-7'} ${flipping ? 'opacity-50' : ''}`}
           >
             <Icon name="flip" size={mainView === 'local' ? 16 : 13} />
           </span>
         </button>
         <button
-          onClick={() => mainView === 'local' && setMainView('remote')}
+          onPointerDown={mainView === 'local' ? onPipPointerDown : undefined}
+          onPointerMove={mainView === 'local' ? onPipPointerMove : undefined}
+          onPointerUp={mainView === 'local' ? onPipPointerUp : undefined}
+          onPointerCancel={mainView === 'local' ? onPipPointerUp : undefined}
+          style={mainView === 'remote' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
           className={mainView === 'remote'
             ? 'flex-1 relative w-full text-left'
-            : 'absolute top-24 right-4 z-20 h-40 w-28 rounded-2xl overflow-hidden bg-black text-left'}
+            : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-black text-left cursor-grab active:cursor-grabbing'}
         >
           <div ref={remoteVideoRef} className="absolute inset-0 agora-video-fill" />
           {!remoteJoined && (
