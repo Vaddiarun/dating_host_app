@@ -152,7 +152,17 @@ const GRADS = [
   ['#8b7cf6', '#d9a4e0'], ['#6db4f0', '#8b7cf6'], ['#f0759a', '#f4b58b'],
   ['#c8a26a', '#8fb98f'], ['#7cc4a4', '#6db4f0'], ['#e0a92e', '#f0759a'],
 ]
-export function Avatar({ name = '?', size = 44, ring, className = '' }) {
+export function Avatar({ name = '?', size = 44, ring, className = '', src }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        className={`inline-block rounded-full shrink-0 object-cover ${ring ? 'ring-2 ring-offset-1' : ''} ${className}`}
+        style={{ width: size, height: size, '--tw-ring-color': ring || undefined }}
+      />
+    )
+  }
   const i = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % GRADS.length
   const [a, b] = GRADS[i]
   return (

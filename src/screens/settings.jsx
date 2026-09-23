@@ -7,6 +7,7 @@ import { useAuth } from '../state/AuthContext.jsx'
 import { profile as profileApi } from '../api/index.js'
 import { rupees, referenceCode } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
+import { uploadAvatar } from '../lib/avatar.js'
 
 /* 39 / 40 — Settings + Profile */
 export function Settings() {
@@ -31,7 +32,7 @@ export function Settings() {
       <div className="lg:max-w-2xl lg:mx-auto lg:py-8">
         <div className="relative bg-gradient-to-br from-brand-600 to-brand-800 px-5 lg:px-6 pt-3 lg:pt-6 pb-6 text-white lg:rounded-2xl">
           <div className="flex items-center gap-3">
-            <Avatar name={name} size={56} className="ring-2 ring-white/40" />
+            <Avatar name={name} size={56} src={me?.avatarUrl} className="ring-2 ring-white/40" />
             <div>
               <p className="text-[19px] font-bold flex items-center gap-1.5">{name} {me?.kycStatus === 'approved' && <Icon name="shield-check" size={16} className="text-gold-300" />}</p>
               <p className="text-[12px] text-white/70">{me?.phone}</p>
@@ -121,15 +122,25 @@ export function EditProfile() {
   const [email, setEmail] = useState(me?.email || '')
   const [bio, setBio] = useState(me?.hostProfile?.bio || '')
   const [languages, setLanguages] = useState((me?.languages || []).join(', '))
+  const [avatarFile, setAvatarFile] = useState(null)
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const avatarInputRef = useRef(null)
+
+  const pickAvatar = (file) => {
+    if (!file) return
+    setAvatarFile(file)
+    setAvatarPreviewUrl(URL.createObjectURL(file))
+  }
 
   const save = async () => {
     setBusy(true)
     setErr('')
     try {
       const langs = languages.split(',').map((s) => s.trim()).filter(Boolean)
-      const updated = await profileApi.updateMe({ name: name.trim(), email: email.trim() || undefined, languages: langs })
+      const avatarUrl = avatarFile ? await uploadAvatar(avatarFile) : undefined
+      const updated = await profileApi.updateMe({ name: name.trim(), email: email.trim() || undefined, avatarUrl, languages: langs })
       await profileApi.updateHostProfile({ bio: bio.trim() || undefined, languages: langs })
       setMe({ ...updated, hostProfile: { ...me?.hostProfile, bio, languages: langs } })
       nav(-1)
@@ -145,10 +156,18 @@ export function EditProfile() {
       <TopBar title="Edit profile" right={<button onClick={save} disabled={busy} className="rounded-xl bg-brand-600 text-white px-4 py-2 text-[14px] font-semibold disabled:opacity-60">{busy ? 'Saving…' : 'Save'}</button>} />
       <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6">
         <div className="flex flex-col items-center">
-          <div className="relative">
-            <Avatar name={name || 'Host'} size={88} className="ring-4 ring-brand-500/30" />
+          <button type="button" onClick={() => avatarInputRef.current?.click()} className="relative">
+            <Avatar name={name || 'Host'} size={88} src={avatarPreviewUrl || me?.avatarUrl} className="ring-4 ring-brand-500/30" />
             <span className="absolute bottom-0 right-0 h-7 w-7 grid place-items-center rounded-full bg-brand-600 text-white"><Icon name="camera" size={13} /></span>
-          </div>
+          </button>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/jpeg,image/png"
+            capture="user"
+            hidden
+            onChange={(e) => pickAvatar(e.target.files?.[0] || null)}
+          />
         </div>
         <div className="mt-4 space-y-3.5">
           <div><span className="label">Display name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>

@@ -8,6 +8,7 @@ import { profile as profileApi } from '../api/index.js'
 import { errorMessage } from '../lib/errors.js'
 import { referenceCode } from '../lib/format.js'
 import { getBeautySettings, openBeautyCamera } from '../lib/beautyFilter.js'
+import { uploadAvatar } from '../lib/avatar.js'
 
 /* 1 — Splash */
 export function Splash() {
@@ -209,8 +210,17 @@ export function ProfileSetup() {
   const [email, setEmail] = useState(me?.email || '')
   const [languages, setLanguages] = useState((me?.languages || []).join(', ') || 'Hindi, English')
   const [bio, setBio] = useState(me?.hostProfile?.bio || '')
+  const [avatarFile, setAvatarFile] = useState(null)
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const avatarInputRef = useRef(null)
+
+  const pickAvatar = (file) => {
+    if (!file) return
+    setAvatarFile(file)
+    setAvatarPreviewUrl(URL.createObjectURL(file))
+  }
 
   const submit = async () => {
     if (!name.trim()) { setErr('Display name is required'); return }
@@ -218,7 +228,8 @@ export function ProfileSetup() {
     setErr('')
     try {
       const langs = languages.split(',').map((s) => s.trim()).filter(Boolean)
-      const updated = await profileApi.updateMe({ name: name.trim(), email: email.trim() || undefined, languages: langs })
+      const avatarUrl = avatarFile ? await uploadAvatar(avatarFile) : undefined
+      const updated = await profileApi.updateMe({ name: name.trim(), email: email.trim() || undefined, avatarUrl, languages: langs })
       await profileApi.updateHostProfile({ bio: bio.trim() || undefined, languages: langs })
       setMe({ ...updated, hostProfile: { ...me?.hostProfile, bio, languages: langs } })
       nav('/onboarding/audition')
@@ -237,10 +248,22 @@ export function ProfileSetup() {
         <p className="hidden lg:block text-[22px] font-extrabold text-ink-900 pt-6">Set up profile</p>
         <Steps active={0} />
         <div className="flex flex-col items-center">
-          <div className="relative">
-            <div className="h-24 w-24 rounded-full bg-gradient-to-br from-gold-300 to-emerald-300 ring-4 ring-brand-500/40" />
+          <button type="button" onClick={() => avatarInputRef.current?.click()} className="relative">
+            {avatarPreviewUrl ? (
+              <img src={avatarPreviewUrl} alt="Your photo" className="h-24 w-24 rounded-full object-cover ring-4 ring-brand-500/40" />
+            ) : (
+              <div className="h-24 w-24 rounded-full bg-gradient-to-br from-gold-300 to-emerald-300 ring-4 ring-brand-500/40" />
+            )}
             <span className="absolute bottom-0 right-0 h-8 w-8 grid place-items-center rounded-full bg-brand-600 text-white"><Icon name="camera" size={15} /></span>
-          </div>
+          </button>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/jpeg,image/png"
+            capture="user"
+            hidden
+            onChange={(e) => pickAvatar(e.target.files?.[0] || null)}
+          />
           <p className="text-[12px] text-ink-400 mt-2">Add a clear, well-lit photo</p>
         </div>
         <div className="mt-5 space-y-3.5 pb-5">
@@ -290,6 +313,9 @@ export function KycIntro() {
 }
 
 const AUDITION_MAX_SECONDS = 60
+// Bridges the recorded video's S3 key from this step to DocumentUpload's final submit,
+// since the two are separate onboarding screens/routes with no shared state otherwise.
+const AUDITION_VIDEO_KEY_STORAGE_KEY = 'triloplan_host_audition_video_key'
 
 /* 4b — Live audition video */
 export function LiveAudition() {
@@ -391,12 +417,14 @@ export function LiveAudition() {
     setBusy(true)
     setErr('')
     try {
-      // No dedicated audition-video endpoint exists on the backend yet — this reuses the
-      // same presigned-upload mechanism KYC documents already use, so the recording really
-      // does land in real storage. What's still missing server-side is a call to register
-      // it against the host's profile/application once it's there.
-      const { uploadUrl } = await profileApi.getKycUploadUrl(recordedBlob.type || 'video/webm')
+      // Uploaded via the same presigned-KYC-upload mechanism as the id/selfie documents
+      // (backend documentType "audition_video"), but not submitted yet — DocumentUpload's
+      // submit() below reads AUDITION_VIDEO_KEY_STORAGE_KEY back out of sessionStorage and
+      // includes it in the same POST /me/kyc call as the rest of the submission, since this
+      // screen is a separate step from the final "Submit for review" action.
+      const { uploadUrl, key } = await profileApi.getKycUploadUrl(recordedBlob.type || 'video/webm')
       await profileApi.uploadKycFile(uploadUrl, recordedBlob)
+      sessionStorage.setItem(AUDITION_VIDEO_KEY_STORAGE_KEY, key)
       nav('/onboarding/kyc')
     } catch (e) {
       setErr(errorMessage(e, 'Could not submit your video. Try again.'))
@@ -610,7 +638,10 @@ export function DocumentUpload() {
       documents.push({ documentType: 'id_front', key: frontKey })
       if (back) documents.push({ documentType: 'id_back', key: await uploadDocument(back) })
       if (selfie) documents.push({ documentType: 'selfie', key: await uploadDocument(selfie) })
+      const auditionVideoKey = sessionStorage.getItem(AUDITION_VIDEO_KEY_STORAGE_KEY)
+      if (auditionVideoKey) documents.push({ documentType: 'audition_video', key: auditionVideoKey })
       await profileApi.submitKyc(documents)
+      sessionStorage.removeItem(AUDITION_VIDEO_KEY_STORAGE_KEY)
       nav('/onboarding/payout')
     } catch (e) {
       setErr(errorMessage(e, 'Could not submit documents.'))

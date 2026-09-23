@@ -71,6 +71,10 @@ export default function RealtimeBridge() {
         showToast('gift', `${gift?.name || 'Gift'} received · +${beansCredited} beans`)
       }))
 
+      unsubs.push(onSocketEvent('gift:requestDeclined', () => {
+        showToast('gift', 'Gift request declined')
+      }))
+
       // Only steer navigation while the host is somewhere in the onboarding flow —
       // once approved they're on the real app and this shouldn't ever fire again anyway.
       unsubs.push(onSocketEvent('kyc:decision', async ({ status: kycStatus, rejectionReason }) => {

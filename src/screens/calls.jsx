@@ -4,13 +4,14 @@ import Icon from '../ui/Icon.jsx'
 import { StatusBar, PlainHeader, Avatar, Segmented, SectionTitle, ErrorCard } from '../ui/kit.jsx'
 import { GiftRequestSheet } from './misc.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
-import { calls as callsApi, earnings as earningsApi } from '../api/index.js'
+import { calls as callsApi, earnings as earningsApi, chat as chatApi } from '../api/index.js'
 import { rupees, clockTime, dayLabel } from '../lib/format.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
 import { getBeautySettings } from '../lib/beautyFilter.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { errorMessage } from '../lib/errors.js'
 import { playRingtone } from '../lib/sound.js'
+import { onSocketEvent } from '../lib/socket.js'
 
 /* 15 — Calls list */
 export function CallsList() {
@@ -207,6 +208,66 @@ export function Connecting() {
   )
 }
 
+/* In-call chat drawer — a compact version of the Thread component in chat.jsx (same
+ * send/receive API), not the full conversation-history view: this is the live session log
+ * the "in-call chat toggle" screen calls for, not a place to browse past messages. */
+function CallChatDrawer({ recipientId, messages, onSend, onClose }) {
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [err, setErr] = useState('')
+  const bottomRef = useRef(null)
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }) }, [messages])
+
+  const send = async () => {
+    const content = text.trim()
+    if (!content || !recipientId || sending) return
+    setSending(true)
+    setErr('')
+    setText('')
+    try {
+      const res = await chatApi.send(recipientId, content)
+      onSend({ id: res.messageId, senderId: res.senderId, content: res.content, createdAt: res.createdAt })
+    } catch (e) {
+      setText(content)
+      setErr(errorMessage(e, 'Could not send that message.'))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col rounded-t-3xl bg-black/70 backdrop-blur-md max-h-[45%]">
+      <div className="flex items-center justify-between px-4 pt-3 pb-2">
+        <span className="text-[13px] font-semibold text-white">Chat</span>
+        <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-full bg-white/10 text-white"><Icon name="x" size={14} /></button>
+      </div>
+      <div className="flex-1 overflow-y-auto no-scrollbar px-4 space-y-1.5">
+        {messages.length === 0 && <p className="text-[12px] text-white/50 pb-2">No messages yet — say hello!</p>}
+        {messages.map((m) => (
+          <div key={m.id} className={`flex ${m.senderId !== recipientId ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[76%] rounded-2xl px-3 py-1.5 text-[13px] ${m.senderId !== recipientId ? 'bg-brand-600 text-white' : 'bg-white/15 text-white'}`}>
+              {m.content}
+            </div>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+      {err && <p className="px-4 pt-1 text-[11px] text-rose-300">{err}</p>}
+      <div className="flex items-center gap-2 p-3">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && send()}
+          placeholder="Message…"
+          className="flex-1 rounded-full bg-white/10 text-white placeholder-white/40 px-4 py-2 text-[13px] outline-none"
+        />
+        <button onClick={send} disabled={sending || !text.trim()} className="h-9 w-9 grid place-items-center rounded-full bg-brand-600 text-white disabled:opacity-50"><Icon name="send" size={16} /></button>
+      </div>
+    </div>
+  )
+}
+
 /* 18 — On call */
 export function ActiveCall() {
   const nav = useNavigate()
@@ -225,6 +286,8 @@ export function ActiveCall() {
   const [remoteJoined, setRemoteJoined] = useState(false)
   const [flipping, setFlipping] = useState(false)
   const [giftOpen, setGiftOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatMessages, setChatMessages] = useState([])
   const [mainView, setMainView] = useState('remote') // 'remote' | 'local' — tap the small tile to swap
   // Freeform drag position for whichever tile is currently the small PIP — like WhatsApp's
   // draggable self-view bubble, not just a fixed corner. null = default top-right corner.
@@ -241,6 +304,18 @@ export function ActiveCall() {
     if (!callId) return
     callsApi.get(callId).then(setCall).catch((e) => setCallErr(errorMessage(e, 'Could not load call details.')))
   }, [callId])
+
+  // In-call chat toggle (UX_SCREENS_AND_FLOWS.md's "Video call — ongoing" screen) — a live,
+  // session-scoped log rather than loading the counterpart's full message history, since
+  // that's not what this panel is for.
+  useEffect(() => {
+    const counterpartId = call?.userId
+    if (!counterpartId) return
+    return onSocketEvent('chat:message', (m) => {
+      if (m.senderId !== counterpartId) return
+      setChatMessages((prev) => [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, createdAt: m.createdAt }])
+    })
+  }, [call?.userId])
 
   useEffect(() => {
     const t = setInterval(() => setElapsed((s) => s + 1), 1000)
@@ -463,12 +538,21 @@ export function ActiveCall() {
         <div className="w-full max-w-[480px] mx-auto pb-8 px-6 flex items-center justify-between">
           <button onClick={() => setMuted((m) => !m)} className={`h-12 w-12 grid place-items-center rounded-full ${muted ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name={muted ? 'mic-off' : 'mic'} size={20} /></button>
           <button onClick={() => setCam((c) => !c)} className={`h-12 w-12 grid place-items-center rounded-full ${cam ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={cam ? 'video' : 'camera-off'} size={20} /></button>
+          <button onClick={() => setChatOpen((o) => !o)} className={`h-12 w-12 grid place-items-center rounded-full ${chatOpen ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name="chat" size={20} /></button>
           <button onClick={() => setGiftOpen(true)} className="h-12 w-12 grid place-items-center rounded-full bg-white/12"><Icon name="gift" size={20} /></button>
           <button onClick={endCall} disabled={ending} className="h-14 w-14 grid place-items-center rounded-full bg-rose-500"><Icon name="phone-off" size={22} /></button>
         </div>
         {/* Overlay, not a route — navigating away used to unmount this screen entirely and
             tear down the live Agora session just to ask for a gift. */}
         {giftOpen && <GiftRequestSheet userId={call?.userId} onClose={() => setGiftOpen(false)} />}
+        {chatOpen && (
+          <CallChatDrawer
+            recipientId={call?.userId}
+            messages={chatMessages}
+            onSend={(m) => setChatMessages((prev) => [...prev, m])}
+            onClose={() => setChatOpen(false)}
+          />
+        )}
       </div>
     </ImmersiveLayout>
   )

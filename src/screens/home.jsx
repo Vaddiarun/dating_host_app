@@ -9,13 +9,13 @@ import { earnings as earningsApi, presence as presenceApi } from '../api/index.j
 import { rupees, clockTime } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
 
-function MobileHead({ label, tone, name }) {
+function MobileHead({ label, tone, name, avatarUrl }) {
   const nav = useNavigate()
   const { unreadCount } = useNotificationsCount()
   const t = { offline: 'bg-black/5 text-ink-500', online: 'bg-emerald-50 text-emerald-600', call: 'bg-gold-50 text-gold-600', live: 'bg-rose-50 text-rose-500' }[tone]
   return (
     <div className="lg:hidden px-5 pt-2 pb-3 flex items-center gap-2 bg-white">
-      <Avatar name={name} size={42} ring="#6d3be6" />
+      <Avatar name={name} size={42} src={avatarUrl} ring="#6d3be6" />
       <div className="flex-1 min-w-0">
         <p className="text-[16px] font-bold text-ink-900 leading-tight truncate">Hi, {name}</p>
         <span className={`pill ${t} mt-0.5`}><span className="h-1.5 w-1.5 rounded-full bg-current" /> {label}</span>
@@ -171,11 +171,11 @@ export default function Home() {
 
   return (
     <AppLayout tab="/home" title={`Dashboard · ${label}`} maxW="xl" bg="canvas">
-      <MobileHead label={label} tone={state} name={name} />
+      <MobileHead label={label} tone={state} name={name} avatarUrl={me?.avatarUrl} />
 
       {/* desktop greeting */}
       <div className="hidden lg:flex items-center gap-3 mb-6">
-        <Avatar name={name} size={48} ring="#6d3be6" />
+        <Avatar name={name} size={48} src={me?.avatarUrl} ring="#6d3be6" />
         <div>
           <p className="text-[20px] font-extrabold text-ink-900">Hi, {name}</p>
           <p className="text-[13px] text-ink-400">{state === 'offline' ? "You're offline — viewers can't reach you" : `You're ${label.toLowerCase()}`}</p>

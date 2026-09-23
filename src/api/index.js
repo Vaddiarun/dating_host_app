@@ -40,6 +40,12 @@ export const profile = {
   submitKyc: (documents) => apiFetch('/me/kyc', { method: 'POST', body: { documents } }),
   getKycStatus: () => apiFetch('/me/kyc'),
 
+  // Profile photo — same presign-then-PATCH shape as gallery uploads below,
+  // except the result is saved via updateMe({ avatarUrl }) rather than a
+  // dedicated "add" endpoint.
+  getAvatarUploadUrl: (contentType) => apiFetch('/me/avatar/upload-url', { method: 'POST', body: { contentType } }),
+  uploadAvatarFile: (uploadUrl, file) => uploadToPresignedUrl(uploadUrl, file),
+
   listGallery: () => apiFetch('/me/host-profile/gallery'),
   addGalleryItem: (mediaType, url) => apiFetch('/me/host-profile/gallery', { method: 'POST', body: { mediaType, url } }),
   deleteGalleryItem: (id) => apiFetch(`/me/host-profile/gallery/${id}`, { method: 'DELETE' }),
