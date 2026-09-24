@@ -34,6 +34,9 @@ export const profile = {
   getMe: () => apiFetch('/me'),
   updateMe: (data) => apiFetch('/me', { method: 'PATCH', body: data }),
   updateHostProfile: (data) => apiFetch('/me/host-profile', { method: 'PATCH', body: data }),
+  // Host level: level, lifetimeEarnedBeans, beansToNextLevel, maxPrices, currentPrices,
+  // nextLevelMaxPrices, and the full 20-level table. Levels rise automatically with earnings.
+  getLevel: () => apiFetch('/me/level'),
 
   getKycUploadUrl: (contentType) => apiFetch('/me/kyc/upload-url', { method: 'POST', body: { contentType } }),
   uploadKycFile: (uploadUrl, file) => uploadToPresignedUrl(uploadUrl, file),
