@@ -2,7 +2,7 @@ import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 
 import RequireAuth, { RequireApproved } from './state/RequireAuth.jsx'
 import RealtimeBridge from './state/RealtimeBridge.jsx'
-import { Splash, Login, Otp, ProfileSetup, LiveAudition, KycIntro, DocumentUpload, PayoutAccount, UnderReview, Verified, Rejected } from './screens/onboarding.jsx'
+import { Splash, Login, Otp, ProfileSetup, GallerySetup, LiveAudition, KycIntro, DocumentUpload, PayoutAccount, UnderReview, Verified, Rejected } from './screens/onboarding.jsx'
 import Home from './screens/home.jsx'
 import { TopSpenders, TopPerformers } from './screens/leaderboard.jsx'
 import Performance from './screens/performance.jsx'
@@ -30,6 +30,7 @@ export default function App() {
 
       <Route element={<RequireAuth><Outlet /></RequireAuth>}>
         <Route path="/onboarding/profile" element={<ProfileSetup />} />
+        <Route path="/onboarding/gallery" element={<GallerySetup />} />
         <Route path="/onboarding/audition" element={<LiveAudition />} />
         <Route path="/onboarding/kyc" element={<KycIntro />} />
         <Route path="/onboarding/documents" element={<DocumentUpload />} />

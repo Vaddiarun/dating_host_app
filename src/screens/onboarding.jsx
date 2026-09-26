@@ -182,7 +182,7 @@ export function Otp() {
   )
 }
 
-const ONBOARDING_STEPS = ['Profile', 'Audition', 'KYC', 'Payout']
+const ONBOARDING_STEPS = ['Profile', 'Gallery', 'Audition', 'KYC', 'Payout']
 function Steps({ active }) {
   const last = ONBOARDING_STEPS.length - 1
   return (
@@ -232,7 +232,7 @@ export function ProfileSetup() {
       const updated = await profileApi.updateMe({ name: name.trim(), email: email.trim() || undefined, avatarUrl, languages: langs })
       await profileApi.updateHostProfile({ bio: bio.trim() || undefined, languages: langs })
       setMe({ ...updated, hostProfile: { ...me?.hostProfile, bio, languages: langs } })
-      nav('/onboarding/audition')
+      nav('/onboarding/gallery')
     } catch (e) {
       setErr(errorMessage(e, 'Could not save your profile.'))
     } finally {
@@ -279,6 +279,94 @@ export function ProfileSetup() {
   )
 }
 
+const GALLERY_RECOMMENDED = 3
+
+/* 4a — Add gallery photos */
+export function GallerySetup() {
+  const nav = useNavigate()
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [err, setErr] = useState('')
+  const fileRef = useRef(null)
+
+  const load = () => { profileApi.listGallery().then((res) => setItems(res.items || [])).catch(() => {}).finally(() => setLoading(false)) }
+  useEffect(load, [])
+
+  const uploadFile = async (file) => {
+    setUploading(true)
+    setErr('')
+    try {
+      const mediaType = file.type.startsWith('video') ? 'video' : 'photo'
+      const { uploadUrl, url: publicUrl } = await profileApi.getGalleryUploadUrl(file.type || 'application/octet-stream')
+      await profileApi.uploadGalleryFile(uploadUrl, file)
+      await profileApi.addGalleryItem(mediaType, publicUrl)
+      await load()
+    } catch (e) {
+      setErr(errorMessage(e, 'Could not upload that photo.'))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const remove = async (id) => {
+    setItems((prev) => prev.filter((t) => t.id !== id))
+    profileApi.deleteGalleryItem(id).catch(() => load()) // put it back if the delete didn't actually take
+  }
+
+  const photoCount = items.length
+  const complete = photoCount >= GALLERY_RECOMMENDED
+
+  return (
+    <CenterLayout>
+      <StatusBar />
+      <PlainHeader title="Add photos" />
+      <div className="flex-1 overflow-y-auto px-5 lg:px-6 no-scrollbar">
+        <p className="hidden lg:block text-[22px] font-extrabold text-ink-900 pt-6">Add photos</p>
+        <Steps active={1} />
+        <div className="flex flex-col items-center text-center mt-2">
+          <IconBadge name="image" tone="brand" size={56} />
+          <h2 className="mt-3 text-[20px] font-extrabold text-ink-900">Build your gallery</h2>
+          <p className="text-[13px] text-ink-400 mt-1 max-w-xs">Hosts who add 3+ gallery photos get <span className="font-semibold text-ink-700">40% more calls</span>. Add a few of your best shots.</p>
+        </div>
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) uploadFile(file) }}
+        />
+
+        <div className="mt-5 grid grid-cols-3 gap-2.5 pb-5">
+          <button onClick={() => fileRef.current?.click()} disabled={uploading} className="aspect-square rounded-2xl border-2 border-dashed border-brand-300 bg-brand-50/60 grid place-items-center text-brand-500 disabled:opacity-60">
+            {uploading ? <Icon name="refresh" size={20} className="animate-spinslow" /> : <Icon name="plus" size={22} />}
+          </button>
+          {!loading && items.map((t) => (
+            <div key={t.id} className="group relative aspect-square rounded-2xl overflow-hidden bg-black/5">
+              {t.mediaType === 'video' ? (
+                <span className="absolute inset-0 grid place-items-center text-ink-400 bg-black/5"><Icon name="video" size={20} /></span>
+              ) : (
+                <img src={t.url} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              )}
+              <button onClick={() => remove(t.id)} className="absolute top-1.5 right-1.5 h-6 w-6 grid place-items-center rounded-full bg-black/50 text-white opacity-0 group-hover:opacity-100 transition"><Icon name="x" size={12} /></button>
+            </div>
+          ))}
+        </div>
+
+        <div className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-[12px] ${complete ? 'bg-emerald-50 text-emerald-700' : 'bg-gold-50 text-gold-600'}`}>
+          <Icon name={complete ? 'check' : 'alert'} size={14} className="shrink-0" />
+          {complete ? 'Nice — your gallery looks great.' : `Add ${GALLERY_RECOMMENDED - photoCount} more photo${GALLERY_RECOMMENDED - photoCount === 1 ? '' : 's'} for the best results.`}
+        </div>
+        <ErrorCard message={err} compact className="mt-2" />
+      </div>
+      <div className="p-4 border-t border-black/5">
+        <button onClick={() => nav('/onboarding/audition')} className="btn-primary">{photoCount > 0 ? 'Continue' : 'Skip for now'}</button>
+      </div>
+    </CenterLayout>
+  )
+}
+
 /* 5 — KYC intro */
 export function KycIntro() {
   const nav = useNavigate()
@@ -292,7 +380,7 @@ export function KycIntro() {
       <StatusBar />
       <TopBar title="Verification" />
       <div className="flex-1 px-5 lg:px-6">
-        <Steps active={2} />
+        <Steps active={3} />
         <div className="flex flex-col items-center text-center mt-2">
           <IconBadge name="shield-check" tone="brand" size={56} />
           <h2 className="mt-3 text-[22px] font-extrabold text-ink-900">Verify to start earning</h2>
@@ -443,7 +531,7 @@ export function LiveAudition() {
       <StatusBar />
       <TopBar title="Live audition video" />
       <div className="flex-1 overflow-y-auto px-5 lg:px-6 no-scrollbar">
-        <Steps active={1} />
+        <Steps active={2} />
         <div className="rounded-xl bg-brand-50 px-3.5 py-3 flex items-start gap-2 text-[12px] text-brand-700">
           <Icon name="video" size={15} className="mt-0.5 shrink-0" /> Record a short video introducing yourself. Please state where you're from.
         </div>
@@ -827,7 +915,7 @@ export function PayoutAccount({ standalone }) {
       <StatusBar />
       <TopBar title="Payout account" />
       <div className="flex-1 overflow-y-auto px-5 lg:px-6 no-scrollbar">
-        <Steps active={3} />
+        <Steps active={4} />
         {body}
       </div>
       <div className="p-4"><button onClick={submit} disabled={busy || !formValid} className="btn-primary disabled:opacity-60">{busy ? 'Saving…' : 'Save account'}</button></div>
