@@ -1,17 +1,30 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
-import { StatusBar, PlainHeader, Avatar, Segmented, SectionTitle, ErrorCard } from '../ui/kit.jsx'
+import { StatusBar, PlainHeader, Avatar, Segmented, SectionTitle, ErrorCard, Toggle } from '../ui/kit.jsx'
+import { BeautyControls } from '../ui/BeautyControls.jsx'
+import { EmojiPicker, insertAtCaret } from '../ui/EmojiPicker.jsx'
+import { FloatingComments, recentComments } from '../ui/FloatingComments.jsx'
 import { GiftRequestSheet } from './misc.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
-import { calls as callsApi, earnings as earningsApi, chat as chatApi } from '../api/index.js'
+import { calls as callsApi, earnings as earningsApi, chat as chatApi, profile as profileApi } from '../api/index.js'
 import { rupees, clockTime, dayLabel } from '../lib/format.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
-import { getBeautySettings } from '../lib/beautyFilter.js'
+import { getBeautySettings, setBeautySettings } from '../lib/beautyFilter.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { errorMessage } from '../lib/errors.js'
 import { playRingtone } from '../lib/sound.js'
 import { onSocketEvent } from '../lib/socket.js'
+
+/** 'voice' | 'video' | null (unknown) for a call-ish object or raw type string. The user app
+ * creates calls with `type: 'voice' | 'video'` (POST /calls); history rows expose it as
+ * `callType`, so both spellings are accepted, plus 'audio' as a synonym for voice. */
+function callKind(src) {
+  const t = typeof src === 'string' ? src : (src?.type ?? src?.callType)
+  if (t === 'voice' || t === 'audio') return 'voice'
+  if (t === 'video') return 'video'
+  return null
+}
 
 /* 15 — Calls list */
 export function CallsList() {
@@ -108,6 +121,13 @@ export function IncomingCall() {
   const [err, setErr] = useState('')
   const rate = sp.get('rate')
   const callerName = sp.get('callerName') || 'Caller'
+  const [kind, setKind] = useState(() => callKind(sp.get('type')))
+
+  // The ring payload may not say voice vs video — the call record always does.
+  useEffect(() => {
+    if (kind || !callId) return
+    callsApi.get(callId).then((c) => setKind(callKind(c))).catch(() => {})
+  }, [callId, kind])
 
   // Rings until the host actually acts on it — accept/decline below stop it explicitly,
   // and leaving this screen any other way stops it via this same cleanup. Vibration is a
@@ -135,7 +155,7 @@ export function IncomingCall() {
     setErr('')
     try {
       const res = await callsApi.accept(callId)
-      nav(`/call/connecting?callId=${callId}`, { state: { channelName: res.channelName, agoraToken: res.agoraToken, callerName: res.callerName || callerName } })
+      nav(`/call/connecting?callId=${callId}`, { state: { channelName: res.channelName, agoraToken: res.agoraToken, callerName: res.callerName || callerName, callType: callKind(res) || kind } })
     } catch (e) {
       setErr(errorMessage(e, 'Could not accept this call.'))
     } finally {
@@ -164,7 +184,10 @@ export function IncomingCall() {
           <Avatar name={callerName} size={150} className="ring-4 ring-white/20" />
         </div>
         <div className="mt-6 flex items-center gap-2"><h2 className="text-[28px] font-extrabold">{callerName}</h2></div>
-        <p className="text-[14px] text-white/70 mt-1">Incoming video call</p>
+        <p className="text-[14px] text-white/70 mt-1 flex items-center gap-1.5">
+          <Icon name={kind === 'voice' ? 'phone' : 'video'} size={14} />
+          {kind === 'voice' ? 'Incoming voice call' : kind === 'video' ? 'Incoming video call' : 'Incoming call'}
+        </p>
         {rate && <span className="pill bg-white/10 text-white text-[13px] mt-4">Earn {rupees(Number(rate))} / min</span>}
         {err && <p className="text-[13px] text-rose-300 mt-4 px-6 text-center">{err}</p>}
       </div>
@@ -211,11 +234,13 @@ export function Connecting() {
 /* In-call chat drawer — a compact version of the Thread component in chat.jsx (same
  * send/receive API), not the full conversation-history view: this is the live session log
  * the "in-call chat toggle" screen calls for, not a place to browse past messages. */
-function CallChatDrawer({ recipientId, messages, onSend, onClose }) {
+function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose }) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState('')
+  const [emojiOpen, setEmojiOpen] = useState(false)
   const bottomRef = useRef(null)
+  const inputRef = useRef(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }) }, [messages])
 
@@ -227,7 +252,7 @@ function CallChatDrawer({ recipientId, messages, onSend, onClose }) {
     setText('')
     try {
       const res = await chatApi.send(recipientId, content)
-      onSend({ id: res.messageId, senderId: res.senderId, content: res.content, createdAt: res.createdAt })
+      onSend({ id: res.messageId, senderId: res.senderId, content: res.content, createdAt: res.createdAt, at: Date.now() })
     } catch (e) {
       setText(content)
       setErr(errorMessage(e, 'Could not send that message.'))
@@ -236,33 +261,74 @@ function CallChatDrawer({ recipientId, messages, onSend, onClose }) {
     }
   }
 
+  const comments = messages.map((m) => ({ id: m.id, name: m.senderId === recipientId ? recipientName : 'You', text: m.content, at: m.at }))
+
+  // No panel — the conversation floats over the video like Instagram live comments, with just a
+  // soft bottom gradient so white text stays readable on a bright background.
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col rounded-t-3xl bg-black/70 backdrop-blur-md max-h-[45%]">
-      <div className="flex items-center justify-between px-4 pt-3 pb-2">
-        <span className="text-[13px] font-semibold text-white">Chat</span>
-        <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-full bg-white/10 text-white"><Icon name="x" size={14} /></button>
-      </div>
-      <div className="flex-1 overflow-y-auto no-scrollbar px-4 space-y-1.5">
-        {messages.length === 0 && <p className="text-[12px] text-white/50 pb-2">No messages yet — say hello!</p>}
-        {messages.map((m) => (
-          <div key={m.id} className={`flex ${m.senderId !== recipientId ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[76%] rounded-2xl px-3 py-1.5 text-[13px] ${m.senderId !== recipientId ? 'bg-brand-600 text-white' : 'bg-white/15 text-white'}`}>
-              {m.content}
-            </div>
-          </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
+    <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col pt-16 bg-gradient-to-t from-black/75 via-black/35 to-transparent animate-fade-in ${emojiOpen ? 'max-h-[70%]' : 'max-h-[50%]'}`}>
+      {messages.length === 0
+        ? <p className="px-4 pb-2 text-[12px] text-white/70" style={{ textShadow: '0 1px 3px rgba(0,0,0,.75)' }}>No messages yet — say hello!</p>
+        : <FloatingComments comments={comments} fadeOut={false} scrollable endRef={bottomRef} className="flex-1 px-4" />}
       {err && <p className="px-4 pt-1 text-[11px] text-rose-300">{err}</p>}
       <div className="flex items-center gap-2 p-3">
+        <button onClick={() => setEmojiOpen((o) => !o)} className={`h-9 w-9 shrink-0 grid place-items-center rounded-full ${emojiOpen ? 'bg-white text-ink-900' : 'bg-white/15 text-white'}`}><Icon name="smile" size={18} /></button>
         <input
+          ref={inputRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onFocus={() => setEmojiOpen(false)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
           placeholder="Message…"
-          className="flex-1 rounded-full bg-white/10 text-white placeholder-white/40 px-4 py-2 text-[13px] outline-none"
+          className="flex-1 rounded-full bg-white/15 border border-white/20 text-white placeholder-white/60 px-4 py-2 text-[13px] outline-none backdrop-blur-sm"
         />
-        <button onClick={send} disabled={sending || !text.trim()} className="h-9 w-9 grid place-items-center rounded-full bg-brand-600 text-white disabled:opacity-50"><Icon name="send" size={16} /></button>
+        <button onClick={send} disabled={sending || !text.trim()} className="h-9 w-9 shrink-0 grid place-items-center rounded-full bg-brand-600 text-white disabled:opacity-50"><Icon name="send" size={16} /></button>
+        <button onClick={onClose} className="h-9 w-9 shrink-0 grid place-items-center rounded-full bg-white/15 text-white"><Icon name="x" size={16} /></button>
+      </div>
+      {emojiOpen && <EmojiPicker dark onPick={(e) => setText((t) => insertAtCaret(inputRef.current, t, e))} />}
+    </div>
+  )
+}
+
+/* In-call beauty editor — the same controls as Settings → Beauty filter, applied live to the
+ * video the caller is seeing. Edits last for this call only unless saved as the default, so a
+ * quick tweak for bad lighting doesn't silently overwrite the host's usual look. */
+function CallBeautySheet({ settings, onChange, onClose }) {
+  const [status, setStatus] = useState('') // '' | 'saving' | 'synced' | 'local'
+  const [saveErr, setSaveErr] = useState('')
+
+  const saveDefault = async () => {
+    setStatus('saving')
+    setSaveErr('')
+    // Local cache first, same as the Settings screen — every camera pipeline reads it
+    // synchronously, so it counts as saved even if the account sync below fails.
+    setBeautySettings(settings)
+    try {
+      await profileApi.updateBeautySettings(settings)
+      setStatus('synced')
+    } catch (e) {
+      setSaveErr(errorMessage(e, 'Saved on this device, but could not sync to your account.'))
+      setStatus('local')
+    }
+  }
+
+  return (
+    <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col rounded-t-3xl bg-black/75 backdrop-blur-md max-h-[50%]">
+      <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-1">
+        <span className="text-[13px] font-semibold text-white flex-1">Beauty</span>
+        <Toggle on={settings.enabled} onChange={(v) => onChange({ enabled: v })} />
+        <button onClick={onClose} className="h-7 w-7 grid place-items-center rounded-full bg-white/10 text-white"><Icon name="x" size={14} /></button>
+      </div>
+      <div className="flex-1 overflow-y-auto no-scrollbar px-4 pb-2">
+        <BeautyControls settings={settings} onChange={onChange} dark compact />
+      </div>
+      <div className="flex items-center gap-3 px-4 pb-4 pt-2">
+        <p className={`flex-1 text-[11px] ${status === 'local' ? 'text-gold-300' : 'text-white/50'}`}>
+          {status === 'synced' ? 'Saved as your default look.' : status === 'local' ? saveErr : 'Changes apply to this call only.'}
+        </p>
+        <button onClick={saveDefault} disabled={status === 'saving'} className="shrink-0 rounded-full bg-white/12 px-3.5 py-2 text-[12px] font-semibold text-white disabled:opacity-50">
+          {status === 'saving' ? 'Saving…' : 'Save as default'}
+        </button>
       </div>
     </div>
   )
@@ -275,7 +341,10 @@ export function ActiveCall() {
   const location = useLocation()
   const { me } = useAuth()
   const callId = sp.get('callId')
-  const { channelName, agoraToken, callerName: navCallerName } = location.state || {}
+  const { channelName, agoraToken, callerName: navCallerName, callType: navCallType } = location.state || {}
+  // null until known — the join below waits for it, since a voice call must never open the camera.
+  const [kind, setKind] = useState(() => callKind(navCallType))
+  const isVoice = kind === 'voice'
   const [muted, setMuted] = useState(false)
   const [cam, setCam] = useState(true)
   const [call, setCall] = useState(null)
@@ -288,6 +357,8 @@ export function ActiveCall() {
   const [giftOpen, setGiftOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatMessages, setChatMessages] = useState([])
+  const [beautyOpen, setBeautyOpen] = useState(false)
+  const [beauty, setBeauty] = useState(getBeautySettings)
   const [mainView, setMainView] = useState('remote') // 'remote' | 'local' — tap the small tile to swap
   // Freeform drag position for whichever tile is currently the small PIP — like WhatsApp's
   // draggable self-view bubble, not just a fixed corner. null = default top-right corner.
@@ -301,8 +372,13 @@ export function ActiveCall() {
   const leaveTimerRef = useRef(null)
 
   useEffect(() => {
-    if (!callId) return
-    callsApi.get(callId).then(setCall).catch((e) => setCallErr(errorMessage(e, 'Could not load call details.')))
+    if (!callId) { setKind((k) => k || 'video'); return }
+    callsApi.get(callId)
+      .then((c) => { setCall(c); setKind((k) => k || callKind(c) || 'video') })
+      .catch((e) => {
+        setCallErr(errorMessage(e, 'Could not load call details.'))
+        setKind((k) => k || 'video') // unknown — fall back to the old always-video behavior rather than never joining
+      })
   }, [callId])
 
   // In-call chat toggle (UX_SCREENS_AND_FLOWS.md's "Video call — ongoing" screen) — a live,
@@ -313,7 +389,7 @@ export function ActiveCall() {
     if (!counterpartId) return
     return onSocketEvent('chat:message', (m) => {
       if (m.senderId !== counterpartId) return
-      setChatMessages((prev) => [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, createdAt: m.createdAt }])
+      setChatMessages((prev) => [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, createdAt: m.createdAt, at: Date.now() }])
     })
   }, [call?.userId])
 
@@ -324,6 +400,7 @@ export function ActiveCall() {
 
   useEffect(() => {
     if (!channelName || !agoraToken) { setRtcErr('No call credentials — rejoin from Calls.'); return }
+    if (!kind) return // still finding out voice vs video
     const key = `${channelName}|${agoraToken}`
     clearTimeout(leaveTimerRef.current)
     let cancelled = false
@@ -342,7 +419,9 @@ export function ActiveCall() {
           channelName,
           token: agoraToken,
           uid: me?.id,
-          beautySettings: getBeautySettings(),
+          video: kind === 'video', // voice calls publish the mic only — no camera at all
+          beautySettings: beauty,
+          alwaysBeautyPipeline: true, // so the in-call Beauty sheet can switch it on mid-call
           onRemoteUser: (user, mediaType, left) => {
             // Agora fires this once per media type (audio and video publish/
             // subscribe independently) — this used to bail out entirely for
@@ -389,10 +468,30 @@ export function ActiveCall() {
         sessionRef.current = null
       }, 400)
     }
-  }, [channelName, agoraToken])
+  }, [channelName, agoraToken, kind])
 
   useEffect(() => { sessionRef.current?.localAudioTrack?.setEnabled(!muted) }, [muted])
   useEffect(() => { sessionRef.current?.localVideoTrack?.setEnabled(cam) }, [cam])
+
+  const updateBeauty = (patch) => {
+    setBeauty((b) => ({ ...b, ...patch }))
+    sessionRef.current?.beautyCamera?.updateSettings(patch)
+  }
+
+  // The beauty sheet and chat drawer share the bottom of the screen — only one at a time.
+  // Opening beauty also makes the self-view full-screen so the effect is actually visible
+  // while adjusting, then puts the layout back the way it was.
+  const beautyPrevViewRef = useRef('remote')
+  const openBeauty = () => {
+    setChatOpen(false)
+    beautyPrevViewRef.current = mainView
+    setMainView('local')
+    setBeautyOpen(true)
+  }
+  const closeBeauty = () => {
+    setBeautyOpen(false)
+    setMainView(beautyPrevViewRef.current)
+  }
 
   const flipCamera = async () => {
     if (!sessionRef.current?.localVideoTrack) return
@@ -483,7 +582,7 @@ export function ActiveCall() {
             <div className="flex-1 min-w-0">
               <p className="text-[15px] font-semibold truncate">{callerName}</p>
               <p className="text-[11.5px] text-white/55 flex items-center gap-1.5 mt-0.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {mm}:{ss} · HD
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {mm}:{ss} · {isVoice ? 'Voice call' : 'HD'}
               </p>
             </div>
             <span className="flex items-center gap-1.5 shrink-0 rounded-full bg-gold-400/15 border border-gold-400/25 px-2.5 py-1.5 text-[13px] font-bold text-gold-300">
@@ -492,62 +591,95 @@ export function ActiveCall() {
           </div>
           {callErr && <p className="text-[12px] text-rose-300 px-1">{callErr}</p>}
         </div>
-        {/* The small PIP tile is freely draggable anywhere on screen — like WhatsApp's
-            self-view bubble — and a plain tap (no movement) still swaps which video is
-            full-screen, same as before. Whichever is small stays `absolute` with an explicit
-            z-20; the big one is a plain in-flow `flex-1 relative` — that z-gap is what keeps
-            the small tile painting on top regardless of which video it currently holds (see
-            the stacking-order note this was originally added for). */}
-        <button
-          onPointerDown={mainView === 'remote' ? onPipPointerDown : undefined}
-          onPointerMove={mainView === 'remote' ? onPipPointerMove : undefined}
-          onPointerUp={mainView === 'remote' ? onPipPointerUp : undefined}
-          onPointerCancel={mainView === 'remote' ? onPipPointerUp : undefined}
-          style={mainView === 'local' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
-          className={mainView === 'local'
-            ? 'flex-1 relative w-full text-left'
-            : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800 cursor-grab active:cursor-grabbing'}
-        >
-          <div ref={localVideoRef} className="absolute inset-0 agora-video-fill" />
-          <span
-            onClick={(e) => { e.stopPropagation(); flipCamera() }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onPointerUp={(e) => e.stopPropagation()}
-            className={`absolute grid place-items-center rounded-full bg-black/50 text-white ${mainView === 'local' ? 'bottom-4 right-4 h-10 w-10' : 'bottom-1 right-1 h-7 w-7'} ${flipping ? 'opacity-50' : ''}`}
-          >
-            <Icon name="flip" size={mainView === 'local' ? 16 : 13} />
-          </span>
-        </button>
-        <button
-          onPointerDown={mainView === 'local' ? onPipPointerDown : undefined}
-          onPointerMove={mainView === 'local' ? onPipPointerMove : undefined}
-          onPointerUp={mainView === 'local' ? onPipPointerUp : undefined}
-          onPointerCancel={mainView === 'local' ? onPipPointerUp : undefined}
-          style={mainView === 'remote' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
-          className={mainView === 'remote'
-            ? 'flex-1 relative w-full text-left'
-            : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-black text-left cursor-grab active:cursor-grabbing'}
-        >
-          <div ref={remoteVideoRef} className="absolute inset-0 agora-video-fill" />
-          {!remoteJoined && (
-            <div className="absolute inset-0 grid place-items-center">
-              {rtcErr ? <p className="text-[13px] text-white/60 px-8 text-center">{rtcErr}</p> : <div className="h-56 w-56 rounded-full bg-white/5" />}
+        {isVoice ? (
+          <>
+            {/* Voice call — nothing to show but who you're talking to. */}
+            <div className="flex-1 flex flex-col items-center justify-center px-6">
+              <div className="relative">
+                <span className="absolute inset-0 rounded-full bg-brand-400/30 animate-pulse-ring" />
+                <Avatar name={callerName} size={140} className="ring-4 ring-white/15" />
+              </div>
+              <p className="mt-6 text-[22px] font-extrabold">{callerName}</p>
+              <p className="mt-1 text-[14px] text-white/60 flex items-center gap-1.5"><Icon name="phone" size={14} /> Voice call · {mm}:{ss}</p>
+              {rtcErr && <p className="mt-4 text-[13px] text-rose-300 text-center">{rtcErr}</p>}
             </div>
-          )}
-        </button>
+          </>
+        ) : (
+          <>
+            {/* The small PIP tile is freely draggable anywhere on screen — like WhatsApp's
+                self-view bubble — and a plain tap (no movement) still swaps which video is
+                full-screen, same as before. Whichever is small stays `absolute` with an explicit
+                z-20; the big one is a plain in-flow `flex-1 relative` — that z-gap is what keeps
+                the small tile painting on top regardless of which video it currently holds (see
+                the stacking-order note this was originally added for). */}
+            <button
+              onPointerDown={mainView === 'remote' ? onPipPointerDown : undefined}
+              onPointerMove={mainView === 'remote' ? onPipPointerMove : undefined}
+              onPointerUp={mainView === 'remote' ? onPipPointerUp : undefined}
+              onPointerCancel={mainView === 'remote' ? onPipPointerUp : undefined}
+              style={mainView === 'local' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
+              className={mainView === 'local'
+                ? 'flex-1 relative w-full text-left'
+                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800 cursor-grab active:cursor-grabbing'}
+            >
+              <div ref={localVideoRef} className="absolute inset-0 agora-video-fill" />
+              <span
+                onClick={(e) => { e.stopPropagation(); flipCamera() }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                className={`absolute grid place-items-center rounded-full bg-black/50 text-white ${mainView === 'local' ? 'bottom-4 right-4 h-10 w-10' : 'bottom-1 right-1 h-7 w-7'} ${flipping ? 'opacity-50' : ''}`}
+              >
+                <Icon name="flip" size={mainView === 'local' ? 16 : 13} />
+              </span>
+            </button>
+            <button
+              onPointerDown={mainView === 'local' ? onPipPointerDown : undefined}
+              onPointerMove={mainView === 'local' ? onPipPointerMove : undefined}
+              onPointerUp={mainView === 'local' ? onPipPointerUp : undefined}
+              onPointerCancel={mainView === 'local' ? onPipPointerUp : undefined}
+              style={mainView === 'remote' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
+              className={mainView === 'remote'
+                ? 'flex-1 relative w-full text-left'
+                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-black text-left cursor-grab active:cursor-grabbing'}
+            >
+              <div ref={remoteVideoRef} className="absolute inset-0 agora-video-fill" />
+              {!remoteJoined && (
+                <div className="absolute inset-0 grid place-items-center">
+                  {rtcErr ? <p className="text-[13px] text-white/60 px-8 text-center">{rtcErr}</p> : <div className="h-56 w-56 rounded-full bg-white/5" />}
+                </div>
+              )}
+            </button>
+          </>
+        )}
         <div className="w-full max-w-[480px] mx-auto pb-8 px-6 flex items-center justify-between">
           <button onClick={() => setMuted((m) => !m)} className={`h-12 w-12 grid place-items-center rounded-full ${muted ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name={muted ? 'mic-off' : 'mic'} size={20} /></button>
-          <button onClick={() => setCam((c) => !c)} className={`h-12 w-12 grid place-items-center rounded-full ${cam ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={cam ? 'video' : 'camera-off'} size={20} /></button>
-          <button onClick={() => setChatOpen((o) => !o)} className={`h-12 w-12 grid place-items-center rounded-full ${chatOpen ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name="chat" size={20} /></button>
+          {!isVoice && (
+            <>
+              <button onClick={() => setCam((c) => !c)} className={`h-12 w-12 grid place-items-center rounded-full ${cam ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={cam ? 'video' : 'camera-off'} size={20} /></button>
+              <button onClick={() => (beautyOpen ? closeBeauty() : openBeauty())} className={`h-12 w-12 grid place-items-center rounded-full ${beautyOpen ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name="sparkles" size={20} /></button>
+            </>
+          )}
+          <button onClick={() => { if (beautyOpen) closeBeauty(); setChatOpen((o) => !o) }} className={`h-12 w-12 grid place-items-center rounded-full ${chatOpen ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name="chat" size={20} /></button>
           <button onClick={() => setGiftOpen(true)} className="h-12 w-12 grid place-items-center rounded-full bg-white/12"><Icon name="gift" size={20} /></button>
           <button onClick={endCall} disabled={ending} className="h-14 w-14 grid place-items-center rounded-full bg-rose-500"><Icon name="phone-off" size={22} /></button>
         </div>
         {/* Overlay, not a route — navigating away used to unmount this screen entirely and
             tear down the live Agora session just to ask for a gift. */}
         {giftOpen && <GiftRequestSheet userId={call?.userId} onClose={() => setGiftOpen(false)} />}
+        {/* With the chat closed, new messages from the caller still float up over the video for
+            a few seconds (Instagram-live style) instead of arriving unseen. Re-rendered every
+            second by the call timer, which is what advances their fade-out. */}
+        {!chatOpen && !beautyOpen && (
+          <FloatingComments
+            comments={recentComments(chatMessages.filter((m) => m.senderId === call?.userId).map((m) => ({ id: m.id, name: callerName, text: m.content, at: m.at })), 4)}
+            className="absolute left-4 right-4 bottom-28 z-20 max-h-[35%] pointer-events-none"
+          />
+        )}
+        {beautyOpen && <CallBeautySheet settings={beauty} onChange={updateBeauty} onClose={closeBeauty} />}
         {chatOpen && (
           <CallChatDrawer
             recipientId={call?.userId}
+            recipientName={callerName}
             messages={chatMessages}
             onSend={(m) => setChatMessages((prev) => [...prev, m])}
             onClose={() => setChatOpen(false)}
@@ -595,7 +727,7 @@ export function CallSummary() {
       <div className="px-5 lg:px-0 pt-8 lg:pt-2 pb-4 flex flex-col items-center">
         <Avatar name={callerName} size={92} className="ring-4 ring-brand-500/30" />
         <h2 className="mt-3 text-[22px] font-extrabold text-ink-900">{callerName}</h2>
-        <p className="text-[13px] text-ink-400">{call?.type === 'voice' ? 'Voice call' : 'Video call'}{durationSec ? ` · ${mins} min ${secs} sec` : ''}</p>
+        <p className="text-[13px] text-ink-400">{callKind(call) === 'voice' ? 'Voice call' : 'Video call'}{durationSec ? ` · ${mins} min ${secs} sec` : ''}</p>
         <ErrorCard message={err} onRetry={load} compact className="w-full mt-3" />
         <div className="card w-full mt-5 p-4">
           <div className="flex items-center justify-between"><span className="text-[14px] text-ink-500">You earned</span><span className="text-[22px] font-extrabold text-gold-500">{rupees(call?.totalAmountPaise)}</span></div>

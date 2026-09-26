@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { PlainHeader, Avatar, Segmented, ErrorCard } from '../ui/kit.jsx'
+import { EmojiPicker, insertAtCaret, isJumboEmoji } from '../ui/EmojiPicker.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { chat as chatApi } from '../api/index.js'
 import { timeAgo, clockTime } from '../lib/format.js'
@@ -52,6 +53,8 @@ function Thread({ conv }) {
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState('')
   const [sendErr, setSendErr] = useState('')
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const inputRef = useRef(null)
   const recipientId = conv.otherParticipant?.id
   const name = conv.otherParticipant?.name || conv.otherParticipant?.phone || 'User'
   const bottomRef = useRef(null)
@@ -107,22 +110,36 @@ function Thread({ conv }) {
         {loading && <p className="text-center text-[12px] text-ink-300">Loading…</p>}
         {!loading && err && <ErrorCard message={err} onRetry={load} />}
         {!loading && !err && messages.length === 0 && <p className="text-center text-[12px] text-ink-300">No messages yet — say hello!</p>}
-        {messages.map((m) => (
-          <div key={m.id} className={`flex ${m.senderId !== recipientId ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[76%] rounded-2xl px-3.5 py-2.5 text-[14px] ${m.senderId !== recipientId ? 'bg-brand-600 text-white rounded-br-md' : 'bg-white text-ink-900 border border-black/5 rounded-bl-md'}`}>
-              {m.content}<span className={`block text-[10px] mt-1 ${m.senderId !== recipientId ? 'text-white/60' : 'text-ink-300'}`}>{clockTime(m.createdAt)}</span>
+        {messages.map((m) => {
+          const mine = m.senderId !== recipientId
+          if (isJumboEmoji(m.content)) {
+            return (
+              <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[76%] ${mine ? 'text-right' : ''}`}>
+                  <span className="text-[40px] leading-tight">{m.content}</span>
+                  <span className="block text-[10px] text-ink-300">{clockTime(m.createdAt)}</span>
+                </div>
+              </div>
+            )
+          }
+          return (
+            <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[76%] rounded-2xl px-3.5 py-2.5 text-[14px] ${mine ? 'bg-brand-600 text-white rounded-br-md' : 'bg-white text-ink-900 border border-black/5 rounded-bl-md'}`}>
+                {m.content}<span className={`block text-[10px] mt-1 ${mine ? 'text-white/60' : 'text-ink-300'}`}>{clockTime(m.createdAt)}</span>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
         <div ref={bottomRef} />
       </div>
 
       {sendErr && <p className="shrink-0 px-4 pb-1 text-[12px] text-rose-500 bg-white">{sendErr}</p>}
       <div className="shrink-0 p-3 border-t border-black/5 flex items-center gap-2 bg-white">
-        <button className="h-10 w-10 grid place-items-center rounded-full bg-black/5 text-ink-500"><Icon name="smile" size={20} /></button>
-        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Message…" className="input flex-1 rounded-full" />
+        <button onClick={() => setEmojiOpen((o) => !o)} className={`h-10 w-10 grid place-items-center rounded-full ${emojiOpen ? 'bg-brand-50 text-brand-600' : 'bg-black/5 text-ink-500'}`}><Icon name="smile" size={20} /></button>
+        <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)} onFocus={() => setEmojiOpen(false)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Message…" className="input flex-1 rounded-full" />
         <button onClick={send} disabled={sending || !text.trim()} className="h-10 w-10 grid place-items-center rounded-full bg-brand-600 text-white disabled:opacity-50"><Icon name="send" size={18} /></button>
       </div>
+      {emojiOpen && <div className="shrink-0"><EmojiPicker onPick={(e) => setText((t) => insertAtCaret(inputRef.current, t, e))} /></div>}
 
       {sheet && (
         <div className="absolute inset-0 z-20 flex flex-col justify-end" onClick={() => setSheet(false)}>

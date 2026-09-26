@@ -93,9 +93,11 @@ export default function RealtimeBridge() {
         return
       }
 
-      unsubs.push(onSocketEvent('call:incoming', ({ callId, userId, callerName, ratePerMinutePaise }) => {
+      unsubs.push(onSocketEvent('call:incoming', ({ callId, userId, callerName, ratePerMinutePaise, type, callType }) => {
         const params = new URLSearchParams({ callId, callerId: userId ?? '', rate: ratePerMinutePaise ?? '' })
         if (callerName) params.set('callerName', callerName)
+        // voice vs video — IncomingCall falls back to fetching the call if this isn't in the payload
+        if (type || callType) params.set('type', type || callType)
         nav(`/call/incoming?${params.toString()}`)
       }))
 
