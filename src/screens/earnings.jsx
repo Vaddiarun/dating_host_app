@@ -69,6 +69,7 @@ export function Earnings() {
             <button onClick={() => nav('/earnings/breakdown')} className="btn-outline">Breakdown</button>
             <button onClick={() => nav('/earnings/history')} className="btn-outline">History</button>
             <button onClick={() => nav('/earnings/statement')} className="btn-outline">Statement</button>
+            <button onClick={() => nav('/settings/level')} className="btn-outline"><Icon name="crown" size={16} /> Levels & prices</button>
           </div>
         </div>
       )}
