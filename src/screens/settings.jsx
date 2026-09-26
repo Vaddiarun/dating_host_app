@@ -5,7 +5,7 @@ import { TopBar, Avatar, Toggle, Row, IconBadge, ResultScreen, SectionTitle, Err
 import { AppLayout } from '../ui/layouts.jsx'
 import { useAuth } from '../state/AuthContext.jsx'
 import { profile as profileApi } from '../api/index.js'
-import { rupees, referenceCode } from '../lib/format.js'
+import { rupees, beans, referenceCode } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
 import { uploadAvatar } from '../lib/avatar.js'
 
@@ -23,9 +23,12 @@ export function Settings() {
     try { await logout() } finally { nav('/login', { replace: true }) }
   }
 
+  const [level, setLevel] = useState(null)
+  useEffect(() => { profileApi.getLevel().then(setLevel).catch(() => {}) }, [])
+
   const name = me?.name || 'Host'
   const rating = me?.hostProfile?.rating
-  const videoRate = me?.hostProfile?.ratePerMinutePaise
+  const videoRate = level?.currentPrices.videoRatePerMinutePaise
 
   return (
     <AppLayout tab="/settings" title="Profile & settings" maxW="lg" bg="canvas" pad={false}>
@@ -39,6 +42,7 @@ export function Settings() {
               <div className="mt-1.5 flex gap-2">
                 <span className="pill bg-black/25 text-white text-[11px]">{rating?.average != null ? rating.average.toFixed(1) : '—'} ★</span>
                 <span className="pill bg-black/25 text-white text-[11px]">{rating?.count ?? 0} ratings</span>
+                {level && <span className="pill bg-gold-400/25 text-gold-200 text-[11px] flex items-center gap-1"><Icon name="crown" size={11} /> Level {level.level}</span>}
               </div>
             </div>
           </div>
@@ -50,6 +54,7 @@ export function Settings() {
             <Row icon="settings" tone="brand" title="Edit profile" sub="Name, bio, languages" onClick={() => nav('/settings/edit-profile')} />
             <Row icon="image" tone="brand" title="Gallery" sub="Photos & videos" onClick={() => nav('/settings/gallery')} />
             <Row icon="sparkles" tone="gold" title="Beauty filter" sub="Smooth your camera in calls & live" onClick={() => nav('/settings/beauty-filter')} />
+            <Row icon="crown" tone="gold" title="Host level" sub={level ? `Level ${level.level} of ${level.maxLevel}${level.beansToNextLevel != null ? ` · ${beans(level.beansToNextLevel)} beans to next` : ' · Max level'}` : 'Your level & prices'} onClick={() => nav('/settings/level')} />
             <Row icon="wallet" tone="gold" title="Rate settings" sub={videoRate ? `${rupees(videoRate)}/min video` : 'Set your rates'} onClick={() => nav('/settings/rates')} />
             <Row icon="shield-check" tone="green" title="KYC status" sub={me?.kycStatus?.replace('_', ' ')} right={<span className="pill bg-emerald-50 text-emerald-600 text-[11px] capitalize">{me?.kycStatus?.replace('_', ' ')}</span>} onClick={() => nav('/settings/kyc')} />
             <Row icon="card" tone="brand" title="Payout details" onClick={() => nav('/settings/payouts')} />
@@ -182,30 +187,144 @@ export function EditProfile() {
   )
 }
 
+/* Host level — level, progress to the next one, and what each level lets the host charge.
+ * Levels are driven entirely by lifetime earnings on the backend; nothing here edits them. */
+export function HostLevel() {
+  const nav = useNavigate()
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+  const load = () => { setErr(''); profileApi.getLevel().then(setData).catch((e) => setErr(errorMessage(e, 'Could not load your level.'))) }
+  useEffect(load, [])
+
+  const isMax = data && data.beansToNextLevel == null
+  // Progress within the current level only (0–1,00,000), not lifetime total.
+  const intoLevel = data ? data.lifetimeEarnedBeans - (data.level - 1) * data.beansPerLevel : 0
+  const pct = isMax ? 100 : Math.min(100, Math.round((intoLevel / (data?.beansPerLevel || 1)) * 100))
+
+  return (
+    <AppLayout tab="/settings" title="Host level" back bottomNav={false} maxW="md" bg="canvas">
+      <TopBar title="Host level" />
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6">
+        <ErrorCard message={err} onRetry={load} />
+        {data && (
+          <>
+            <div className="rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 p-5 text-white">
+              <div className="flex items-center gap-3">
+                <span className="grid place-items-center h-14 w-14 rounded-2xl bg-gold-400/20 text-gold-300"><Icon name="crown" size={28} /></span>
+                <div>
+                  <p className="text-[13px] text-white/70">Your level</p>
+                  <p className="text-[28px] font-extrabold leading-tight">Level {data.level}<span className="text-[15px] font-semibold text-white/60"> / {data.maxLevel}</span></p>
+                </div>
+              </div>
+              <div className="mt-4 h-2.5 rounded-full bg-white/15 overflow-hidden">
+                <div className="h-full rounded-full bg-gold-400" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="mt-2 text-[13px] text-white/80">
+                {isMax ? "You've reached the top level." : `${beans(data.beansToNextLevel)} more beans to reach Level ${data.level + 1}`}
+              </p>
+              <p className="text-[12px] text-white/60">Lifetime earned: {beans(data.lifetimeEarnedBeans)} beans · withdrawals never lower your level</p>
+            </div>
+
+            <SectionTitle className="mt-5 mb-2">Your prices now</SectionTitle>
+            <div className="card px-4 divide-y divide-black/5">
+              <PriceRow label="Video call" unit="/min" current={data.currentPrices.videoRatePerMinutePaise} max={data.maxPrices.videoRatePerMinutePaise} />
+              <PriceRow label="Voice call" unit="/min" current={data.currentPrices.voiceRatePerMinutePaise} max={data.maxPrices.voiceRatePerMinutePaise} />
+              <PriceRow label="Message" unit="/msg" current={data.currentPrices.messageRatePaise} max={data.maxPrices.messageRatePaise} />
+            </div>
+            <button onClick={() => nav('/settings/rates')} className="btn-outline mt-3">Change my rates</button>
+
+            {data.nextLevelMaxPrices && (
+              <p className="mt-4 text-[13px] text-ink-500">
+                At Level {data.level + 1} you can charge up to {rupees(data.nextLevelMaxPrices.videoRatePerMinutePaise)}/min video, {rupees(data.nextLevelMaxPrices.voiceRatePerMinutePaise)}/min voice and {rupees(data.nextLevelMaxPrices.messageRatePaise)} per message.
+              </p>
+            )}
+
+            <SectionTitle className="mt-5 mb-2">All levels</SectionTitle>
+            <div className="card overflow-hidden">
+              <div className="grid grid-cols-[3.5rem_1fr_1fr_1fr] gap-2 px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide text-ink-400 bg-black/[.02]">
+                <span>Level</span><span>Video</span><span>Voice</span><span>Message</span>
+              </div>
+              {data.levels.map((l) => {
+                const current = l.level === data.level
+                return (
+                  <div key={l.level} className={`grid grid-cols-[3.5rem_1fr_1fr_1fr] gap-2 px-4 py-2.5 text-[13px] border-t border-black/5 ${current ? 'bg-gold-50 font-bold text-ink-900' : l.level < data.level ? 'text-ink-400' : 'text-ink-700'}`}>
+                    <span className="flex items-center gap-1">{current && <Icon name="crown" size={12} className="text-gold-500" />}{l.level}</span>
+                    <span>{rupees(l.videoRatePerMinutePaise)}</span>
+                    <span>{rupees(l.voiceRatePerMinutePaise)}</span>
+                    <span>{rupees(l.messageRatePaise)}</span>
+                  </div>
+                )
+              })}
+            </div>
+            <p className="mt-3 text-[12px] text-ink-400">You move up one level for every {beans(data.beansPerLevel)} beans you earn from calls, gifts and messages.</p>
+          </>
+        )}
+      </div>
+    </AppLayout>
+  )
+}
+
+function PriceRow({ label, unit, current, max }) {
+  return (
+    <div className="flex items-center justify-between py-3">
+      <span className="text-[15px] font-semibold text-ink-900">{label}</span>
+      <span className="text-right">
+        <span className="block text-[15px] font-bold text-ink-900">{rupees(current)}{unit}</span>
+        <span className="block text-[12px] text-ink-400">{current === max ? 'Level price' : `Max ${rupees(max)}${unit}`}</span>
+      </span>
+    </div>
+  )
+}
+
 /* 40 — Rate settings */
 export function RateSettings() {
   const { me, setMe } = useAuth()
   const hp = me?.hostProfile
   const [video, setVideo] = useState(hp?.ratePerMinutePaise != null ? String(hp.ratePerMinutePaise / 100) : '')
   const [voice, setVoice] = useState(hp?.voiceRatePerMinutePaise != null ? String(hp.voiceRatePerMinutePaise / 100) : '')
+  const [message, setMessage] = useState(hp?.messageRatePaise != null ? String(hp.messageRatePaise / 100) : '')
   const [priv, setPriv] = useState(hp?.privateLiveRatePerMinutePaise != null ? String(hp.privateLiveRatePerMinutePaise / 100) : '')
   const [auto, setAuto] = useState(hp?.autoAcceptCalls ?? true)
   const [night, setNight] = useState(hp?.voiceCallsOnlyAfterMidnight ?? false)
+  const [level, setLevel] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => { profileApi.getLevel().then(setLevel).catch(() => {}) }, [])
+  const max = level?.maxPrices
+
+  // Empty = "charge my level's price" (sent as null), which then rises by itself on every
+  // level-up. A typed value must stay at or under the level maximum — the backend enforces
+  // this too (400); checking here just gives a clearer message before the round-trip.
+  const toPaise = (v) => (v === '' ? null : Math.round(Number(v) * 100))
+  const capped = [
+    [toPaise(video), max?.videoRatePerMinutePaise, 'Video call'],
+    [toPaise(voice), max?.voiceRatePerMinutePaise, 'Voice call'],
+    [toPaise(message), max?.messageRatePaise, 'Message'],
+  ]
 
   const save = async () => {
-    setBusy(true)
     setErr('')
+    setSaved(false)
+    for (const [value, cap, label] of capped) {
+      if (value != null && cap != null && value > cap) {
+        setErr(`${label} can't be more than ${rupees(cap)} at Level ${level.level}.`)
+        return
+      }
+    }
+    setBusy(true)
     try {
       const updated = await profileApi.updateHostProfile({
-        ratePerMinutePaise: video ? Math.round(Number(video) * 100) : undefined,
-        voiceRatePerMinutePaise: voice ? Math.round(Number(voice) * 100) : undefined,
+        ratePerMinutePaise: toPaise(video),
+        voiceRatePerMinutePaise: toPaise(voice),
+        messageRatePaise: toPaise(message),
         privateLiveRatePerMinutePaise: priv ? Math.round(Number(priv) * 100) : undefined,
         autoAcceptCalls: auto,
         voiceCallsOnlyAfterMidnight: night,
       })
-      setMe({ ...me, hostProfile: updated })
+      setMe({ ...me, hostProfile: { ...me?.hostProfile, ...updated } })
+      setSaved(true)
     } catch (e) {
       setErr(errorMessage(e, 'Could not save rates.'))
     } finally {
@@ -213,15 +332,37 @@ export function RateSettings() {
     }
   }
 
+  const hint = (cap) => (cap != null ? `Up to ${rupees(cap)} at Level ${level.level} · leave empty to use ${rupees(cap)}` : '')
+
   return (
     <AppLayout tab="/settings" title="Rate settings" back bottomNav={false} maxW="md" bg="canvas">
       <TopBar title="Rate settings" />
       <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
+        {level && (
+          <div className="card p-3.5 mb-4 flex items-center gap-3">
+            <span className="grid place-items-center h-10 w-10 rounded-xl bg-gold-50 text-gold-500"><Icon name="crown" size={18} /></span>
+            <p className="flex-1 text-[13px] text-ink-500">You're at <span className="font-bold text-ink-900">Level {level.level}</span>. Your maximum prices go up by ₹20 with every level you earn.</p>
+          </div>
+        )}
         <SectionTitle className="mb-2">Per-minute rates (₹)</SectionTitle>
         <div className="card p-4 space-y-3.5">
-          <div><span className="label">Video call</span><input className="input" value={video} onChange={(e) => setVideo(e.target.value.replace(/[^\d.]/g, ''))} placeholder="24" /></div>
-          <div><span className="label">Voice call</span><input className="input" value={voice} onChange={(e) => setVoice(e.target.value.replace(/[^\d.]/g, ''))} placeholder="12" /></div>
+          <div>
+            <span className="label">Video call</span>
+            <input className="input" value={video} onChange={(e) => setVideo(e.target.value.replace(/[^\d.]/g, ''))} placeholder={max ? String(max.videoRatePerMinutePaise / 100) : ''} />
+            <p className="text-[12px] text-ink-400 mt-1">{hint(max?.videoRatePerMinutePaise)}</p>
+          </div>
+          <div>
+            <span className="label">Voice call</span>
+            <input className="input" value={voice} onChange={(e) => setVoice(e.target.value.replace(/[^\d.]/g, ''))} placeholder={max ? String(max.voiceRatePerMinutePaise / 100) : ''} />
+            <p className="text-[12px] text-ink-400 mt-1">{hint(max?.voiceRatePerMinutePaise)}</p>
+          </div>
           <div><span className="label">Private live</span><input className="input" value={priv} onChange={(e) => setPriv(e.target.value.replace(/[^\d.]/g, ''))} placeholder="30" /></div>
+        </div>
+        <SectionTitle className="mt-5 mb-2">Per-message price (₹)</SectionTitle>
+        <div className="card p-4">
+          <span className="label">Message from a user</span>
+          <input className="input" value={message} onChange={(e) => setMessage(e.target.value.replace(/[^\d.]/g, ''))} placeholder={max ? String(max.messageRatePaise / 100) : ''} />
+          <p className="text-[12px] text-ink-400 mt-1">{hint(max?.messageRatePaise)}</p>
         </div>
         <SectionTitle className="mt-5 mb-2">Availability</SectionTitle>
         <div className="card p-4 divide-y divide-black/5">
@@ -229,6 +370,7 @@ export function RateSettings() {
           <div className="flex items-center gap-3 pt-3"><span className="flex-1 text-[15px] font-semibold text-ink-900">Voice calls only after 12 AM</span><Toggle on={night} onChange={setNight} /></div>
         </div>
         <ErrorCard message={err} compact className="mt-3" />
+        {saved && <p className="mt-3 text-[13px] font-semibold text-emerald-600">Rates saved</p>}
         <button onClick={save} disabled={busy} className="btn-primary mt-4 disabled:opacity-60">{busy ? 'Saving…' : 'Save rates'}</button>
       </div>
     </AppLayout>

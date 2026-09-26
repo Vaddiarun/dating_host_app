@@ -12,7 +12,7 @@ import { ChatList, ChatConvo } from './screens/chat.jsx'
 import { GoLive, Broadcast, LiveSummary } from './screens/live.jsx'
 import { Earnings, Breakdown, EarningsHistory, Statement } from './screens/earnings.jsx'
 import { Withdraw, WithdrawConfirm, WithdrawStatus } from './screens/withdraw.jsx'
-import { Settings, KycStatus, EditProfile, RateSettings, Gallery, PayoutDetails, NotificationSettings, HelpSupport } from './screens/settings.jsx'
+import { Settings, KycStatus, EditProfile, RateSettings, HostLevel, Gallery, PayoutDetails, NotificationSettings, HelpSupport } from './screens/settings.jsx'
 import {
   Notifications, ReportUser, ReportSubmitted, BlockUser, Blocked, AskGift, GiftReceived,
   LoadingState, NoCalls, SomethingWrong, OfflineState, Reconnecting, SessionExpired, AccountSuspended, ScreenshotBlocked,
@@ -44,6 +44,7 @@ export default function App() {
         <Route path="/settings/kyc" element={<KycStatus />} />
         <Route path="/settings/edit-profile" element={<EditProfile />} />
         <Route path="/settings/rates" element={<RateSettings />} />
+        <Route path="/settings/level" element={<HostLevel />} />
         <Route path="/settings/gallery" element={<Gallery />} />
         <Route path="/settings/payouts" element={<PayoutDetails />} />
         <Route path="/settings/payouts/add" element={<PayoutAccount standalone />} />

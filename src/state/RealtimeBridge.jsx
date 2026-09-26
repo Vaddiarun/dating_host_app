@@ -117,6 +117,11 @@ export default function RealtimeBridge() {
         showGift({ senderName, giftName: g?.name || 'Gift', beansCredited: beansCredited ?? 0 })
       }))
 
+      // Levels go up automatically on the backend as earnings cross each 1,00,000-bean mark.
+      unsubs.push(onSocketEvent('host:level-up', ({ level }) => {
+        showToast('crown', `Level up! You're now Level ${level} — your max prices went up`)
+      }))
+
       unsubs.push(onSocketEvent('gift:requestDeclined', () => {
         showToast('gift', 'Gift request declined')
       }))
