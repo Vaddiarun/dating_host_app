@@ -9,6 +9,7 @@ import { getBeautySettings, openBeautyCamera } from '../lib/beautyFilter.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { ErrorCard } from '../ui/kit.jsx'
 import { errorMessage } from '../lib/errors.js'
+import { FloatingComments, recentComments } from '../ui/FloatingComments.jsx'
 import { onSocketEventWhenReady } from '../lib/socket.js'
 
 /* 22 — Go live setup */
@@ -308,8 +309,8 @@ export function Broadcast() {
     }
   }
 
-  // Keep only the last ~8s of comments, newest last — old ones age out on their own each tick.
-  const visibleChat = chat.filter((c) => Date.now() - c.at < 8000).slice(-8)
+  // Keep only the last few seconds of comments, newest last — old ones age out on their own each tick.
+  const visibleChat = recentComments(chat.map((c) => ({ id: c.id, name: c.n, text: c.t, at: c.at })), 8)
 
   const end = async () => {
     setEnding(true)
@@ -352,14 +353,8 @@ export function Broadcast() {
           {/* Floating comments, Instagram/TikTok-live style — they sit over the video and
               age out on their own (see visibleChat) instead of stacking in a permanent
               panel that pushes the composer down the screen. */}
-          <div className="absolute inset-x-0 bottom-0 pt-12 pb-2 flex justify-center pointer-events-none bg-gradient-to-t from-black/55 via-black/10 to-transparent">
-            <div className="w-full max-w-[480px] px-4 flex flex-col justify-end gap-1.5">
-              {visibleChat.map((c) => (
-                <p key={c.id} className="text-[13px] w-fit max-w-[86%] rounded-2xl bg-black/35 px-3 py-1.5 animate-fade-in">
-                  <span className="font-bold">{c.n}</span> {c.t}
-                </p>
-              ))}
-            </div>
+          <div className="absolute inset-x-0 bottom-0 pt-16 pb-2 flex justify-center pointer-events-none bg-gradient-to-t from-black/40 to-transparent">
+            <FloatingComments comments={visibleChat} className="w-full max-w-[480px] px-4 max-h-[40vh]" />
           </div>
         </div>
         <div className="w-full max-w-[480px] mx-auto pb-6 px-4 flex items-center gap-2">

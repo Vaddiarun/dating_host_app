@@ -9,7 +9,7 @@
 // several MB and most sessions never touch a face-aware filter.
 const WASM_BASE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
-const MAX_FACES = 4
+const MAX_FACES = 2 // calls/broadcasts are one person on camera; each extra face costs inference time
 
 let landmarkerPromise = null
 async function getLandmarker() {
@@ -41,6 +41,8 @@ export const LIPS_OUTER = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 40
 // size regions relative to the face (eye enhance falls back to LEFT_EYE/RIGHT_EYE loops).
 const LEFT_CHEEK_CENTER = 425
 const RIGHT_CHEEK_CENTER = 205
+const LEFT_EYE_CORNERS = [33, 133]
+const RIGHT_EYE_CORNERS = [263, 362]
 
 /** Detects up to a few faces in the given video element for the given timestamp (ms).
  * Returns an array of landmark sets (each 468/478 normalized x/y points), possibly empty. */
@@ -83,18 +85,29 @@ export function eyeMaskPath(landmarks, width, height) {
   return path
 }
 
-/** Two soft circular regions over the cheeks, for the Ruddy/blush pass. Radius is derived from
- * the face's own bounding box so it scales with how close the face is to the camera. */
-export function cheekMaskPath(landmarks, width, height) {
-  const xs = FACE_OVAL.map((i) => landmarks[i]?.x).filter((v) => v != null)
-  const faceWidthPx = (Math.max(...xs) - Math.min(...xs)) * width
-  const r = Math.max(6, faceWidthPx * 0.16)
+/** Face oval only (no feature holes) — the wide, softly feathered region tone adjustments
+ * (brightness/warmth/glow) are blended through, so the face never ends up a visibly different
+ * tone from the neck and ears. */
+export function faceOvalPath(landmarks, width, height) {
   const path = new Path2D()
-  for (const idx of [LEFT_CHEEK_CENTER, RIGHT_CHEEK_CENTER]) {
-    const p = landmarks[idx]
-    if (!p) continue
-    path.moveTo(p.x * width + r, p.y * height)
-    path.arc(p.x * width, p.y * height, r, 0, Math.PI * 2)
-  }
+  loopToPath(path, landmarks, FACE_OVAL, width, height)
   return path
+}
+
+/** Face width as a fraction of frame width — every radius/feather in the pipeline is scaled
+ * off this, so effects look the same whether the face is close to the camera or far away. */
+export function faceWidthNorm(landmarks) {
+  const xs = FACE_OVAL.map((i) => landmarks[i]?.x).filter((v) => v != null)
+  return xs.length ? Math.max(...xs) - Math.min(...xs) : 0
+}
+
+/** Cheek centers (normalized), for the Ruddy pass's radial blush. */
+export function cheekCenters(landmarks) {
+  return [LEFT_CHEEK_CENTER, RIGHT_CHEEK_CENTER].map((i) => landmarks[i]).filter(Boolean)
+}
+
+/** Average eye width (normalized), to size the eye mask's feather. */
+export function eyeWidthNorm(landmarks) {
+  const width = ([a, b]) => (landmarks[a] && landmarks[b] ? Math.hypot(landmarks[a].x - landmarks[b].x, landmarks[a].y - landmarks[b].y) : 0)
+  return (width(LEFT_EYE_CORNERS) + width(RIGHT_EYE_CORNERS)) / 2
 }

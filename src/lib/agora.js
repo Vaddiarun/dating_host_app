@@ -40,8 +40,13 @@ export function appIdFromToken(token) {
  * publisher/subscriber privileges under; the backend's tokens already encode PUBLISHER vs
  * SUBSCRIBER per role (live.routes.ts), but that encoding does nothing under plain 'rtc'
  * mode, which is what every join used to request regardless of call vs. broadcast.
+ *
+ * `alwaysBeautyPipeline`: route the camera through the beauty pipeline even when beauty is
+ * currently disabled (it passes frames through untouched then). Needed wherever settings can be
+ * edited mid-session — a plain camera track has no pipeline to push updated settings into, so
+ * turning beauty on during the call would otherwise do nothing.
  */
-export async function joinAndPublish({ channelName, token, uid, video = true, mode = 'rtc', role, beautySettings, onRemoteUser } = {}) {
+export async function joinAndPublish({ channelName, token, uid, video = true, mode = 'rtc', role, beautySettings, alwaysBeautyPipeline = false, onRemoteUser } = {}) {
   const RTC = await sdk()
   RTC.setLogLevel(4) // errors only — the SDK is chatty at its default level
   const appId = appIdFromToken(token)
@@ -62,7 +67,7 @@ export async function joinAndPublish({ channelName, token, uid, video = true, mo
   let localVideoTrack = null
   let beautyCamera = null
   if (video) {
-    if (beautySettings?.enabled) {
+    if (beautySettings && (beautySettings.enabled || alwaysBeautyPipeline)) {
       // audio: false — the mic is already handled by createMicrophoneAudioTrack above;
       // opening it a second time here would race two getUserMedia calls for the same
       // device, which is exactly the class of NOT_READABLE bug fixed earlier for the

@@ -12,7 +12,7 @@
 // all move symmetrically around a neutral midpoint (0 = unchanged) rather than toward any fixed
 // target appearance, for every face, identically.
 
-import { detectFaces, skinMaskPath, eyeMaskPath, cheekMaskPath } from './faceMesh.js'
+import { detectFaces, skinMaskPath, eyeMaskPath, faceOvalPath, faceWidthNorm, cheekCenters, eyeWidthNorm } from './faceMesh.js'
 import { getPreset } from './beautyPresets.js'
 import { getColorFilter } from './colorFilters.js'
 
@@ -58,11 +58,20 @@ export function filterForIntensity(level) {
   return `blur(${(l * 1.2).toFixed(2)}px) brightness(${(1 + l * 0.06).toFixed(3)}) contrast(${(1 - l * 0.03).toFixed(3)}) saturate(${(1 + l * 0.05).toFixed(3)})`
 }
 
-const FACE_DETECT_INTERVAL_MS = 120 // ~8/s face-landmark updates; the draw loop itself still
-// runs at full rAF rate reusing whatever masks this last found — decoupling detection from
-// rendering (per the "don't run landmarks at render frequency" requirement) is what keeps this
-// affordable on a phone instead of a per-frame ML-inference bottleneck.
-const FEATHER_PX = 5
+const FACE_DETECT_INTERVAL_MS = 80 // ~12/s face-landmark updates; the draw loop itself still
+// runs every video frame reusing (and easing toward) whatever landmarks this last found —
+// decoupling detection from rendering is what keeps this affordable on a phone instead of a
+// per-frame ML-inference bottleneck.
+const FACE_HOLD_MS = 450 // keep using the last landmarks this long after a missed detection,
+// so a single dropped detection (motion blur, a hand passing by) doesn't flash the effect off
+const PRESENCE_EASE = 0.15 // per-frame ease of the whole effect's strength in/out
+const MAX_PROCESS_DIM = 960 // longest side the pipeline renders at — plenty for a call feed,
+// and a 1080p camera would otherwise cost ~2.3x the per-frame canvas work for no visible gain
+const SCRATCH_SCALE = 0.5 // blurs and masks run on half-size canvases: they're low-frequency by
+// nature, so upscaling them back loses nothing visible and each blur costs ~4x less
+const FRAME_INTERVAL_MS = 1000 / 31 // don't redraw faster than the camera delivers frames
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
 function makeCanvas(w, h) {
   const c = document.createElement('canvas')
@@ -75,21 +84,25 @@ function drawFeatheredMask(ctx, canvas, paths, evenodd, featherPx) {
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   if (!paths.length) return
   ctx.save()
-  ctx.filter = featherPx > 0 ? `blur(${featherPx}px)` : 'none'
+  ctx.filter = featherPx > 0 ? `blur(${featherPx.toFixed(1)}px)` : 'none'
   ctx.fillStyle = '#fff'
   for (const path of paths) ctx.fill(path, evenodd ? 'evenodd' : 'nonzero')
   ctx.restore()
 }
 
 /** Composites `layerCanvas` (a full-frame effect result) onto `destCtx`, masked by
- * `maskCanvas`'s (feathered) alpha — this is what makes the effect follow real face geometry
- * with soft edges instead of a visible boundary. */
+ * `maskCanvas`'s (feathered, possibly smaller) alpha — this is what makes the effect follow real
+ * face geometry with soft edges instead of a visible boundary. */
 function applyMaskedLayer(destCtx, layerCanvas, maskCanvas) {
   const layerCtx = layerCanvas.getContext('2d')
   layerCtx.globalCompositeOperation = 'destination-in'
-  layerCtx.drawImage(maskCanvas, 0, 0)
+  layerCtx.drawImage(maskCanvas, 0, 0, layerCanvas.width, layerCanvas.height)
   layerCtx.globalCompositeOperation = 'source-over'
   destCtx.drawImage(layerCanvas, 0, 0)
+}
+
+function cameraConstraints(facingMode) {
+  return { facingMode, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
 }
 
 /**
@@ -97,10 +110,20 @@ function applyMaskedLayer(destCtx, layerCanvas, maskCanvas) {
  * Beauty Effects + Filter + Custom pipeline, plus controls to live-update settings, switch
  * camera, capture a still frame, and tear everything down. Used both for a real preview and as
  * the source for an Agora custom video track (calls/broadcast) — same implementation either way.
+ *
+ * Beauty Effects per frame, in order:
+ *   1. detail pass (smoothing / blemish) — edge-aware, through a TIGHT skin mask (features cut
+ *      out), so eyes, brows, lips and the face outline stay crisp;
+ *   2. tone pass (brightness / contrast / warmth / shadow lift / glow / clarity) — through a
+ *      WIDE, heavily feathered face mask, so the tone change fades out gradually across the jaw
+ *      and hairline instead of leaving a pasted-on face that doesn't match the neck;
+ *   3. cheek blush and eye enhance, each through its own soft mask.
+ * Every radius and feather scales with the detected face's size, and the whole effect eases in
+ * and out with face presence rather than popping.
  */
 export async function openBeautyCamera({ facingMode = 'user', settings, audio = true } = {}) {
   let current = { ...structuredClone(DEFAULT_BEAUTY_SETTINGS), ...settings }
-  let rawStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode }, audio })
+  let rawStream = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(facingMode), audio })
   let currentFacingMode = facingMode
 
   const video = document.createElement('video')
@@ -109,75 +132,74 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
   video.srcObject = rawStream
   await video.play().catch(() => {})
 
-  // base = raw frame + Beauty Effects face pass; output = + Custom + Filter (the two
+  // base = raw frame + Beauty Effects face passes; output = + Custom + Filter (the two
   // whole-frame passes). Kept separate so Beauty Effects never has to know about Custom/Filter
   // and vice versa, matching the "completely separate systems, composited at render time"
   // requirement.
-  let w = video.videoWidth || 640
-  let h = video.videoHeight || 480
-  const baseCanvas = makeCanvas(w, h)
-  const baseCtx = baseCanvas.getContext('2d')
-  const outputCanvas = makeCanvas(w, h)
-  const outCtx = outputCanvas.getContext('2d')
-  const blurCanvas = makeCanvas(w, h)
-  const blurCtx = blurCanvas.getContext('2d')
-  const fineBlurCanvas = makeCanvas(w, h)
-  const fineBlurCtx = fineBlurCanvas.getContext('2d')
-  const layerCanvas = makeCanvas(w, h)
-  const layerCtx = layerCanvas.getContext('2d')
-  const maskCanvas = makeCanvas(w, h)
-  const maskCtx = maskCanvas.getContext('2d')
-  const eyeLayerCanvas = makeCanvas(w, h)
-  const eyeLayerCtx = eyeLayerCanvas.getContext('2d')
-  const eyeMaskCanvas = makeCanvas(w, h)
-  const eyeMaskCtx = eyeMaskCanvas.getContext('2d')
-  const cheekLayerCanvas = makeCanvas(w, h)
-  const cheekLayerCtx = cheekLayerCanvas.getContext('2d')
-  const cheekMaskCanvas = makeCanvas(w, h)
-  const cheekMaskCtx = cheekMaskCanvas.getContext('2d')
-  // Edge-aware smoothing scratch canvases — see buildEdgeAwareSmoothed() below for what each
-  // one holds at each step.
-  const diffCanvas = makeCanvas(w, h)
-  const diffCtx = diffCanvas.getContext('2d')
-  const diffBoostCanvas = makeCanvas(w, h)
-  const diffBoostCtx = diffBoostCanvas.getContext('2d')
-  const alphaMaskCanvas = makeCanvas(w, h)
-  const alphaMaskCtx = alphaMaskCanvas.getContext('2d')
-  const sharpLayerCanvas = makeCanvas(w, h)
-  const sharpLayerCtx = sharpLayerCanvas.getContext('2d')
-  const edgeAwareCanvas = makeCanvas(w, h)
-  const edgeAwareCtx = edgeAwareCanvas.getContext('2d')
-  const preFilterCanvas = makeCanvas(w, h)
-  const preFilterCtx = preFilterCanvas.getContext('2d')
+  let w = 640, h = 480, sw = 320, sh = 240
+  const full = () => { const c = makeCanvas(w, h); return [c, c.getContext('2d')] }
+  const small = () => { const c = makeCanvas(sw, sh); return [c, c.getContext('2d')] }
+  const [baseCanvas, baseCtx] = full()
+  const [outputCanvas, outCtx] = full()
+  const [layerCanvas, layerCtx] = full()
+  const [snapCanvas, snapCtx] = full() // a copy of the current stage, since a canvas can't reliably be drawn onto itself
+  const [sharpLayerCanvas, sharpLayerCtx] = full()
+  const [edgeAwareCanvas, edgeAwareCtx] = full()
+  const [accentCanvas, accentCtx] = full() // cheek / eye layers, one at a time
+  const [preFilterCanvas, preFilterCtx] = full()
+  const [srcSmallCanvas, srcSmallCtx] = small()
+  const [blurSmallCanvas, blurSmallCtx] = small()
+  const [diffSmallCanvas, diffSmallCtx] = small()
+  const [boostSmallCanvas, boostSmallCtx] = small()
+  const [alphaSmallCanvas, alphaSmallCtx] = small()
+  const [glowSmallCanvas, glowSmallCtx] = small()
+  const [skinMaskCanvas, skinMaskCtx] = small()
+  const [toneMaskCanvas, toneMaskCtx] = small()
+  const [accentMaskCanvas, accentMaskCtx] = small()
+  const fullCanvases = [baseCanvas, outputCanvas, layerCanvas, snapCanvas, sharpLayerCanvas, edgeAwareCanvas, accentCanvas, preFilterCanvas]
+  const smallCanvases = [srcSmallCanvas, blurSmallCanvas, diffSmallCanvas, boostSmallCanvas, alphaSmallCanvas, glowSmallCanvas, skinMaskCanvas, toneMaskCanvas, accentMaskCanvas]
 
   const resize = () => {
-    w = video.videoWidth || 640
-    h = video.videoHeight || 480
-    for (const c of [baseCanvas, outputCanvas, blurCanvas, fineBlurCanvas, layerCanvas, maskCanvas, eyeLayerCanvas, eyeMaskCanvas, cheekLayerCanvas, cheekMaskCanvas, diffCanvas, diffBoostCanvas, alphaMaskCanvas, sharpLayerCanvas, edgeAwareCanvas, preFilterCanvas]) {
-      c.width = w
-      c.height = h
-    }
+    const vw = video.videoWidth || 640
+    const vh = video.videoHeight || 480
+    const scale = Math.min(1, MAX_PROCESS_DIM / Math.max(vw, vh))
+    w = Math.round(vw * scale)
+    h = Math.round(vh * scale)
+    sw = Math.max(1, Math.round(w * SCRATCH_SCALE))
+    sh = Math.max(1, Math.round(h * SCRATCH_SCALE))
+    for (const c of fullCanvases) { c.width = w; c.height = h }
+    for (const c of smallCanvases) { c.width = sw; c.height = sh }
   }
   video.addEventListener('loadedmetadata', resize)
+  video.addEventListener('resize', resize) // camera switch / rotation changes the frame size
   resize()
 
   // Edge-aware smoothing needs to turn a "how much local detail is here" map into an alpha
-  // channel, which Canvas2D can only do via an SVG luminanceToAlpha filter referenced by
-  // `ctx.filter = 'url(#id)'` — a real, standards-defined capability, but not something to
-  // assume works everywhere. A unique id per camera instance avoids collisions if more than
-  // one is ever open at once (e.g. this settings preview plus something else).
-  const lumFilterId = `lum2alpha-${Math.random().toString(36).slice(2)}`
+  // channel, and clarity/sharpness need a real sharpening kernel — Canvas2D can only do either
+  // via SVG filters referenced by `ctx.filter = 'url(#id)'`. A standards-defined capability,
+  // but not something to assume works everywhere, hence the probe below. Unique ids per camera
+  // instance avoid collisions if more than one is ever open at once.
+  const uid = Math.random().toString(36).slice(2)
+  const lumFilterId = `lum2alpha-${uid}`
+  const sharpFilterId = `sharpen-${uid}`
   const svgNS = 'http://www.w3.org/2000/svg'
   const filterSvg = document.createElementNS(svgNS, 'svg')
   filterSvg.setAttribute('width', '0')
   filterSvg.setAttribute('height', '0')
   filterSvg.style.position = 'absolute'
-  const filterEl = document.createElementNS(svgNS, 'filter')
-  filterEl.setAttribute('id', lumFilterId)
-  const feColorMatrix = document.createElementNS(svgNS, 'feColorMatrix')
-  feColorMatrix.setAttribute('type', 'luminanceToAlpha')
-  filterEl.appendChild(feColorMatrix)
-  filterSvg.appendChild(filterEl)
+  const lumFilter = document.createElementNS(svgNS, 'filter')
+  lumFilter.setAttribute('id', lumFilterId)
+  const feLum = document.createElementNS(svgNS, 'feColorMatrix')
+  feLum.setAttribute('type', 'luminanceToAlpha')
+  lumFilter.appendChild(feLum)
+  const sharpFilter = document.createElementNS(svgNS, 'filter')
+  sharpFilter.setAttribute('id', sharpFilterId)
+  const feSharp = document.createElementNS(svgNS, 'feConvolveMatrix')
+  feSharp.setAttribute('order', '3')
+  feSharp.setAttribute('kernelMatrix', '0 -0.5 0 -0.5 3 -0.5 0 -0.5 0') // gentle — a full-strength kernel turned pores and freckles into harsh speckle
+  feSharp.setAttribute('preserveAlpha', 'true')
+  sharpFilter.appendChild(feSharp)
+  filterSvg.append(lumFilter, sharpFilter)
   document.body.appendChild(filterSvg)
 
   // One-time capability probe: a mid-gray square run through a working luminanceToAlpha
@@ -202,69 +224,89 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
     edgeAwareSupported = false
   }
 
-  /** Frequency-separation-style edge-aware smoothing: a heavily blurred "low frequency" base
-   * (tone/color, blotchiness) with the original sharp image re-composited on top ONLY where
-   * there was real local detail (an edge, a pore, a hairline) — measured as |original - blur|,
-   * boosted for contrast, then converted to an alpha mask. Flat skin gets fully smoothed;
-   * genuine texture and edges stay sharp, instead of the whole region blurring uniformly. */
-  const buildEdgeAwareSmoothed = (blurPx) => {
-    blurCtx.filter = `blur(${blurPx}px)`
-    blurCtx.drawImage(video, 0, 0, w, h)
-    blurCtx.filter = 'none'
+  /** Frequency-separation-style edge-aware smoothing: a blurred "low frequency" base (tone,
+   * blotchiness) with the original sharp image re-composited on top in proportion to how much
+   * real local detail there is — |original - blur|, amplified by `gain`, as alpha. Strong edges
+   * (face outline, nostrils, hairline) come back fully sharp; fine skin texture comes back
+   * partially, so skin looks smoothed rather than plastic. Higher `gain` = more texture kept.
+   *
+   * The previous version boosted that detail map with `contrast()`, which pivots at mid-gray
+   * and so crushed every small difference to zero — all fine texture was discarded, which is
+   * exactly the waxy "plastic skin" look. A plain linear gain keeps it proportional instead. */
+  const buildEdgeAwareSmoothed = (blurPx, gain) => {
+    blurSmallCtx.filter = `blur(${(blurPx * SCRATCH_SCALE).toFixed(1)}px)`
+    blurSmallCtx.drawImage(srcSmallCanvas, 0, 0)
+    blurSmallCtx.filter = 'none'
 
-    if (!edgeAwareSupported) return blurCanvas // flat blur only — still correct, just not detail-preserving
+    edgeAwareCtx.clearRect(0, 0, w, h)
+    edgeAwareCtx.drawImage(blurSmallCanvas, 0, 0, w, h)
+    if (!edgeAwareSupported) return edgeAwareCanvas // flat blur only — still correct, just not detail-preserving
 
-    diffCtx.clearRect(0, 0, w, h)
-    diffCtx.drawImage(blurCanvas, 0, 0)
-    diffCtx.globalCompositeOperation = 'difference'
-    diffCtx.drawImage(video, 0, 0, w, h)
-    diffCtx.globalCompositeOperation = 'source-over'
+    diffSmallCtx.clearRect(0, 0, sw, sh)
+    diffSmallCtx.drawImage(blurSmallCanvas, 0, 0)
+    diffSmallCtx.globalCompositeOperation = 'difference'
+    diffSmallCtx.drawImage(srcSmallCanvas, 0, 0)
+    diffSmallCtx.globalCompositeOperation = 'source-over'
 
-    diffBoostCtx.clearRect(0, 0, w, h)
-    diffBoostCtx.filter = 'contrast(2.6) brightness(1.5)'
-    diffBoostCtx.drawImage(diffCanvas, 0, 0)
-    diffBoostCtx.filter = 'none'
+    boostSmallCtx.clearRect(0, 0, sw, sh)
+    boostSmallCtx.filter = `brightness(${gain.toFixed(2)})`
+    boostSmallCtx.drawImage(diffSmallCanvas, 0, 0)
+    boostSmallCtx.filter = 'none'
 
-    alphaMaskCtx.clearRect(0, 0, w, h)
-    alphaMaskCtx.filter = `url(#${lumFilterId})`
-    alphaMaskCtx.drawImage(diffBoostCanvas, 0, 0)
-    alphaMaskCtx.filter = 'none'
+    alphaSmallCtx.clearRect(0, 0, sw, sh)
+    alphaSmallCtx.filter = `url(#${lumFilterId})`
+    alphaSmallCtx.drawImage(boostSmallCanvas, 0, 0)
+    alphaSmallCtx.filter = 'none'
 
     sharpLayerCtx.clearRect(0, 0, w, h)
     sharpLayerCtx.drawImage(video, 0, 0, w, h)
     sharpLayerCtx.globalCompositeOperation = 'destination-in'
-    sharpLayerCtx.drawImage(alphaMaskCanvas, 0, 0)
+    sharpLayerCtx.drawImage(alphaSmallCanvas, 0, 0, w, h)
     sharpLayerCtx.globalCompositeOperation = 'source-over'
 
-    edgeAwareCtx.clearRect(0, 0, w, h)
-    edgeAwareCtx.drawImage(blurCanvas, 0, 0)
     edgeAwareCtx.drawImage(sharpLayerCanvas, 0, 0)
     return edgeAwareCanvas
   }
 
+  /** Draws `src` sharpened onto `ctx` at `alpha` — a real 3x3 sharpening kernel, blended by
+   * alpha to control strength. No-op where SVG canvas filters don't work (see probe above). */
+  const drawSharpened = (ctx, src, alpha) => {
+    if (!edgeAwareSupported || alpha <= 0) return
+    ctx.save()
+    ctx.globalAlpha = Math.min(1, alpha)
+    ctx.filter = `url(#${sharpFilterId})`
+    ctx.drawImage(src, 0, 0, w, h)
+    ctx.restore()
+  }
+
   let running = true
   let raf = null
+  let lastFrameAt = 0
   let faceDetectBroken = false
   let detecting = false
   let lastDetectAt = 0
-  // Detection runs on its own slower interval (FACE_DETECT_INTERVAL_MS below), but rendering
-  // runs every rAF tick — using the raw detected landmarks directly meant the mask visibly
-  // snapped to a new position every ~120ms instead of tracking smoothly, most noticeable on
-  // any head movement. targetFaces holds the latest raw detection; smoothedFaces eases toward
-  // it a little every single rendered frame, so the mask glides instead of jumping.
+  // Detection runs on its own slower interval, but rendering runs every frame — using the raw
+  // detected landmarks directly made the mask visibly snap every detection. targetFaces holds
+  // the latest raw detection; smoothedFaces eases toward it every rendered frame (faster the
+  // further it has to go, so it tracks quick head turns without swimming during small ones).
   let targetFaces = []
   let smoothedFaces = []
-  const LANDMARK_LERP = 0.35
+  let lastSeenAt = 0
+  let presence = 0 // 0..1 — the whole Beauty Effects pass is scaled by this
 
-  const maybeDetectFaces = () => {
-    if (!current.enabled || faceDetectBroken || detecting) return
-    const now = performance.now()
+  const faceEffectsWanted = () => current.enabled && current.preset.id !== 'none'
+
+  const maybeDetectFaces = (now) => {
+    if (!faceEffectsWanted() || faceDetectBroken || detecting) return
     if (now - lastDetectAt < FACE_DETECT_INTERVAL_MS) return
     if (!video.videoWidth) return
     detecting = true
     lastDetectAt = now
     detectFaces(video, now)
-      .then((faces) => { targetFaces = faces })
+      .then((faces) => {
+        targetFaces = faces
+        if (faces.length) lastSeenAt = performance.now()
+      })
       .catch(() => {
         // Model failed to load (offline, blocked CDN, unsupported browser, ...) — Beauty
         // Effects simply won't have a face to target until this succeeds again; Custom/Filter
@@ -275,200 +317,245 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
       .finally(() => { detecting = false })
   }
 
-  // Eases smoothedFaces toward targetFaces by LANDMARK_LERP each call (once per rendered
-  // frame). A change in how many faces are visible just snaps straight to the new set —
-  // there's nothing sensible to interpolate from when a face appears/disappears.
-  const updateSmoothedFaces = () => {
-    if (smoothedFaces.length !== targetFaces.length) {
-      smoothedFaces = targetFaces.map((face) => face.map((pt) => ({ x: pt.x, y: pt.y })))
-      return
-    }
-    for (let i = 0; i < targetFaces.length; i++) {
-      const target = targetFaces[i]
-      const smoothed = smoothedFaces[i]
-      for (let j = 0; j < target.length; j++) {
-        if (!smoothed[j]) { smoothed[j] = { x: target[j].x, y: target[j].y }; continue }
-        smoothed[j].x += (target[j].x - smoothed[j].x) * LANDMARK_LERP
-        smoothed[j].y += (target[j].y - smoothed[j].y) * LANDMARK_LERP
+  const updateSmoothedFaces = (now) => {
+    if (targetFaces.length) {
+      if (smoothedFaces.length !== targetFaces.length) {
+        // A face appeared/disappeared — nothing sensible to interpolate from, snap to the new set.
+        smoothedFaces = targetFaces.map((face) => face.map((pt) => ({ x: pt.x, y: pt.y })))
+      } else {
+        for (let i = 0; i < targetFaces.length; i++) {
+          const target = targetFaces[i]
+          const smoothed = smoothedFaces[i]
+          for (let j = 0; j < target.length; j++) {
+            const s = smoothed[j]
+            if (!s) { smoothed[j] = { x: target[j].x, y: target[j].y }; continue }
+            const dx = target[j].x - s.x
+            const dy = target[j].y - s.y
+            const a = Math.min(1, 0.3 + Math.hypot(dx * w, dy * h) / 25)
+            s.x += dx * a
+            s.y += dy * a
+          }
+        }
       }
+    }
+    // No detection right now: hold the last landmarks briefly, then fade the effect out over
+    // them instead of dropping it in one frame.
+    const present = smoothedFaces.length > 0 && (targetFaces.length > 0 || now - lastSeenAt < FACE_HOLD_MS)
+    presence += ((present ? 1 : 0) - presence) * PRESENCE_EASE
+    if (!present && presence < 0.02) { presence = 0; smoothedFaces = [] }
+  }
+
+  const drawBeautyEffects = () => {
+    const preset = getPreset(current.preset.id)
+    // Concave curve: keeps 0% truly "Original" and 100% at full strength, but front-loads the
+    // middle of the range so ~35% reads as a visible, natural enhancement.
+    const k = Math.pow(current.preset.intensity / 100, 0.55) * presence
+    const p = preset.parameters
+    if (k <= 0.005 || !smoothedFaces.length) return
+
+    const faceW = Math.max(...smoothedFaces.map(faceWidthNorm)) * w
+    const featherSkin = clamp(faceW * 0.035, 2, 24)
+    const featherTone = clamp(faceW * 0.14, 8, 90)
+    const toSmall = (fn) => smoothedFaces.map((lm) => fn(lm, sw, sh))
+
+    srcSmallCtx.drawImage(video, 0, 0, sw, sh)
+
+    // 1) Detail — smoothing / blemish, through the tight skin mask.
+    if (p.smoothing || p.blemish) {
+      drawFeatheredMask(skinMaskCtx, skinMaskCanvas, toSmall(skinMaskPath), true, featherSkin * SCRATCH_SCALE)
+      layerCtx.clearRect(0, 0, w, h)
+      layerCtx.drawImage(baseCanvas, 0, 0)
+      if (p.smoothing) {
+        const texPres = p.texturePreservation ?? 0.8
+        const blurPx = clamp(faceW * (0.012 + 0.016 * k), 2, 16)
+        layerCtx.globalAlpha = Math.min(0.92, p.smoothing * k * 2.2)
+        layerCtx.drawImage(buildEdgeAwareSmoothed(blurPx, 2.5 + 5 * texPres), 0, 0)
+      }
+      // "Acne Removal"/"Skin Texture" fine-detail pass — a smaller-radius edge-aware blur.
+      // Honest limitation: this is texture-scale smoothing, not real blemish detection, so it
+      // softens a mole as much as a spot rather than "removing" one precisely.
+      if (p.blemish) {
+        const blurPx = clamp(faceW * (0.01 + 0.01 * k), 2, 10)
+        layerCtx.globalAlpha = Math.min(0.85, p.blemish * k * 1.6)
+        layerCtx.drawImage(buildEdgeAwareSmoothed(blurPx, 3.5), 0, 0)
+      }
+      layerCtx.globalAlpha = 1
+      applyMaskedLayer(baseCtx, layerCanvas, skinMaskCanvas)
+    }
+
+    // 2) Tone — through the wide, soft face mask.
+    const hasTone = p.brightness || p.contrast || p.saturation || p.shadowLift || p.glow || p.warmth || p.clarity
+    if (hasTone) {
+      drawFeatheredMask(toneMaskCtx, toneMaskCanvas, toSmall(faceOvalPath), false, featherTone * SCRATCH_SCALE)
+      snapCtx.drawImage(baseCanvas, 0, 0)
+      if (p.clarity) drawSharpened(snapCtx, baseCanvas, p.clarity * k * 1.1)
+
+      layerCtx.clearRect(0, 0, w, h)
+      layerCtx.filter = `brightness(${1 + (p.brightness || 0) * k * 1.1}) contrast(${1 + (p.contrast || 0) * k}) saturate(${1 + (p.saturation || 0) * k * 1.2})`
+      layerCtx.drawImage(snapCanvas, 0, 0)
+      layerCtx.filter = 'none'
+
+      // Shadow lift: screen-blending the image with itself follows a real lift curve
+      // (1-(1-x)²) — darks rise, highlights barely move. The old flat white wash raised
+      // everything equally, which is what read as grey fog.
+      if (p.shadowLift) {
+        layerCtx.globalCompositeOperation = 'screen'
+        layerCtx.globalAlpha = Math.min(0.5, p.shadowLift * k * 1.6)
+        layerCtx.drawImage(snapCanvas, 0, 0)
+        layerCtx.globalAlpha = 1
+        layerCtx.globalCompositeOperation = 'source-over'
+      }
+      // Glow: a soft bloom (blurred, slightly brightened copy screened on top) instead of a
+      // flat white soft-light fill — luminous highlights, no loss of contrast.
+      if (p.glow) {
+        glowSmallCtx.filter = `blur(${(faceW * 0.03 * SCRATCH_SCALE).toFixed(1)}px) brightness(1.06)`
+        glowSmallCtx.drawImage(layerCanvas, 0, 0, sw, sh)
+        glowSmallCtx.filter = 'none'
+        layerCtx.globalCompositeOperation = 'screen'
+        layerCtx.globalAlpha = Math.min(0.38, p.glow * k * 0.75)
+        layerCtx.drawImage(glowSmallCanvas, 0, 0, w, h)
+        layerCtx.globalAlpha = 1
+        layerCtx.globalCompositeOperation = 'source-over'
+      }
+      if (p.warmth) {
+        layerCtx.globalCompositeOperation = 'soft-light'
+        layerCtx.fillStyle = `rgba(255,170,100,${Math.min(0.28, p.warmth * k * 1.6)})`
+        layerCtx.fillRect(0, 0, w, h)
+        layerCtx.globalCompositeOperation = 'source-over'
+      }
+      applyMaskedLayer(baseCtx, layerCanvas, toneMaskCanvas)
+    }
+
+    // 3a) Ruddy — radial blush that falls off smoothly to nothing, instead of a feathered disc.
+    if (p.ruddy) {
+      accentMaskCtx.clearRect(0, 0, sw, sh)
+      for (const lm of smoothedFaces) {
+        const r = faceWidthNorm(lm) * sw * 0.2
+        for (const c of cheekCenters(lm)) {
+          const x = c.x * sw, y = c.y * sh
+          const g = accentMaskCtx.createRadialGradient(x, y, 0, x, y, r)
+          g.addColorStop(0, 'rgba(255,255,255,1)')
+          g.addColorStop(0.5, 'rgba(255,255,255,.55)')
+          g.addColorStop(1, 'rgba(255,255,255,0)')
+          accentMaskCtx.fillStyle = g
+          accentMaskCtx.fillRect(x - r, y - r, r * 2, r * 2)
+        }
+      }
+      accentCtx.clearRect(0, 0, w, h)
+      accentCtx.drawImage(baseCanvas, 0, 0)
+      accentCtx.globalCompositeOperation = 'soft-light'
+      accentCtx.fillStyle = `rgba(235,105,120,${Math.min(0.5, p.ruddy * k * 1.1)})`
+      accentCtx.fillRect(0, 0, w, h)
+      accentCtx.globalCompositeOperation = 'source-over'
+      applyMaskedLayer(baseCtx, accentCanvas, accentMaskCanvas)
+    }
+
+    // 3b) Eye enhance — subtle brighten + sharpen inside a mask feathered to the eye's own size.
+    if (p.eyeEnhance) {
+      const eyeW = Math.max(...smoothedFaces.map(eyeWidthNorm)) * w
+      drawFeatheredMask(accentMaskCtx, accentMaskCanvas, toSmall(eyeMaskPath), false, clamp(eyeW * 0.18, 1, 10) * SCRATCH_SCALE)
+      const e = p.eyeEnhance * k
+      accentCtx.clearRect(0, 0, w, h)
+      accentCtx.filter = `brightness(${1 + e * 0.28}) contrast(${1 + e * 0.2}) saturate(${1 + e * 0.15})`
+      accentCtx.drawImage(baseCanvas, 0, 0)
+      accentCtx.filter = 'none'
+      snapCtx.drawImage(accentCanvas, 0, 0)
+      drawSharpened(accentCtx, snapCanvas, e * 0.9)
+      applyMaskedLayer(baseCtx, accentCanvas, accentMaskCanvas)
     }
   }
 
   const draw = () => {
     if (!running) return
-    if (video.videoWidth) {
-      maybeDetectFaces()
-      updateSmoothedFaces()
-      const skinPaths = smoothedFaces.map((lm) => skinMaskPath(lm, w, h))
-      const eyePaths = smoothedFaces.map((lm) => eyeMaskPath(lm, w, h))
-      const cheekPaths = smoothedFaces.map((lm) => cheekMaskPath(lm, w, h))
+    raf = requestAnimationFrame(draw)
+    const now = performance.now()
+    if (now - lastFrameAt < FRAME_INTERVAL_MS) return // 60/120Hz screens: skip ticks with no new camera frame
+    lastFrameAt = now
+    if (!video.videoWidth) return
 
-      // 1) base frame
-      baseCtx.filter = 'none'
-      baseCtx.drawImage(video, 0, 0, w, h)
+    maybeDetectFaces(now)
+    updateSmoothedFaces(now)
 
-      // 2) Beauty Effects — face-aware, only when a preset is chosen and faces are found
-      const preset = getPreset(current.preset.id)
-      const rawK = current.preset.intensity / 100
-      // A straight linear ramp made 30-40% (the default range) look nearly identical to 0% —
-      // per-effect multipliers below were also stacked on top of already-modest preset base
-      // values, so the *real* strength at default intensity was closer to 3-8% opacity, not
-      // visible on real video at all. A concave curve keeps 0% truly "Original image" (as
-      // specified) and 100% at full strength, but front-loads the middle of the range so 35%
-      // reads as a real, visible "natural enhancement" instead of nothing.
-      const pk = Math.pow(rawK, 0.55)
-      const p = preset.parameters
-      if (current.enabled && preset.id !== 'none' && pk > 0 && skinPaths.length) {
-        drawFeatheredMask(maskCtx, maskCanvas, skinPaths, true, FEATHER_PX)
+    // 1) base frame
+    baseCtx.drawImage(video, 0, 0, w, h)
 
-        layerCtx.clearRect(0, 0, w, h)
-        const bAdj = 1 + (p.brightness || 0) * pk * 1.6
-        const cAdj = 1 + (p.contrast || 0) * pk * 1.4
-        const sAdj = 1 + (p.saturation || 0) * pk * 1.6
-        layerCtx.filter = `brightness(${bAdj}) contrast(${cAdj}) saturate(${sAdj})`
-        layerCtx.drawImage(video, 0, 0, w, h)
-        layerCtx.filter = 'none'
+    // 2) Beauty Effects — face-aware, only when a preset is chosen and faces are found
+    if (current.enabled && current.preset.id !== 'none') drawBeautyEffects()
 
-        if (p.shadowLift) {
-          layerCtx.globalCompositeOperation = 'screen'
-          layerCtx.fillStyle = `rgba(255,255,255,${Math.min(0.55, p.shadowLift * pk * 0.8)})`
-          layerCtx.fillRect(0, 0, w, h)
-          layerCtx.globalCompositeOperation = 'source-over'
-        }
+    // 3) Custom — whole-frame, independent of Beauty Effects. brightness/contrast/saturation/
+    // vibrance/exposure are real filter adjustments; temperature/tint/highlights/shadows are
+    // blend-mode approximations (a true per-channel tone curve needs per-pixel readback every
+    // frame — the expensive CPU work this pipeline avoids). Sharpness is a real sharpening
+    // kernel where supported (negative values soften).
+    // The master toggle turns off every pass, not only Beauty Effects — a call's video always
+    // runs through this pipeline (so beauty can be switched on mid-call), which means
+    // "disabled" has to be a true pass-through rather than still applying Custom/Filter.
+    const c = current.enabled ? current.custom : DEFAULT_CUSTOM
+    const nb = 1 + (c.brightness / 50) * 0.2 + (c.exposure / 50) * 0.25
+    const nc = 1 + (c.contrast / 50) * 0.18
+    const ns = 1 + (c.saturation / 50) * 0.25 + (c.vibrance / 50) * 0.15
+    outCtx.filter = `brightness(${nb}) contrast(${nc}) saturate(${ns})`
+    outCtx.drawImage(baseCanvas, 0, 0)
+    outCtx.filter = 'none'
 
-        // Smoothing — edge-aware: a heavily blurred base with the original re-composited back
-        // on top wherever there's real local detail (see buildEdgeAwareSmoothed), so flat skin
-        // smooths fully while pores/edges/hairline stay defined, instead of blurring
-        // everything by the same amount. Blur radius and blend alpha both scale with intensity.
-        if (p.smoothing) {
-          const texPres = p.texturePreservation ?? 0.8
-          const blurPx = (4 + 6 * pk) * (1 - texPres * 0.25)
-          const smoothed = buildEdgeAwareSmoothed(blurPx)
-          layerCtx.globalAlpha = Math.min(1, p.smoothing * pk * 2.2)
-          layerCtx.drawImage(smoothed, 0, 0)
-          layerCtx.globalAlpha = 1
-        }
-        // "Acne Removal"/"Skin Texture" fine-detail pass — a smaller-radius blur blended at
-        // low strength. Honest limitation: this is texture-scale smoothing, not real blemish
-        // detection/classification, so it can't specifically distinguish a blemish from a mole
-        // the way a dedicated inpainting model would — it treats all small-scale detail the
-        // same, which in practice softens both a little rather than "removing" one precisely.
-        if (p.blemish) {
-          fineBlurCtx.filter = `blur(${(2 + 2.5 * pk).toFixed(2)}px)`
-          fineBlurCtx.drawImage(video, 0, 0, w, h)
-          layerCtx.globalAlpha = Math.min(1, p.blemish * pk * 2)
-          layerCtx.drawImage(fineBlurCanvas, 0, 0)
-          layerCtx.globalAlpha = 1
-        }
-        if (p.glow) {
-          layerCtx.globalCompositeOperation = 'soft-light'
-          layerCtx.fillStyle = `rgba(255,255,255,${Math.min(0.85, p.glow * pk * 1.6)})`
-          layerCtx.fillRect(0, 0, w, h)
-          layerCtx.globalCompositeOperation = 'source-over'
-        }
-        if (p.warmth) {
-          layerCtx.globalCompositeOperation = 'overlay'
-          layerCtx.fillStyle = `rgba(255,176,90,${Math.min(0.6, p.warmth * pk * 0.9)})`
-          layerCtx.fillRect(0, 0, w, h)
-          layerCtx.globalCompositeOperation = 'source-over'
-        }
-        if (p.clarity) {
-          layerCtx.globalCompositeOperation = 'overlay'
-          layerCtx.globalAlpha = Math.min(0.7, p.clarity * pk * 1.1)
-          layerCtx.drawImage(video, 0, 0, w, h)
-          layerCtx.globalAlpha = 1
-          layerCtx.globalCompositeOperation = 'source-over'
-        }
+    if (c.sharpness > 0) {
+      snapCtx.drawImage(outputCanvas, 0, 0)
+      drawSharpened(outCtx, snapCanvas, (c.sharpness / 50) * 0.8)
+    } else if (c.sharpness < 0) {
+      snapCtx.drawImage(outputCanvas, 0, 0)
+      outCtx.save()
+      outCtx.globalAlpha = (-c.sharpness / 50) * 0.8
+      outCtx.filter = 'blur(1px)'
+      outCtx.drawImage(snapCanvas, 0, 0)
+      outCtx.restore()
+    }
+    if (c.temperature !== 0) {
+      outCtx.globalCompositeOperation = 'overlay'
+      const a = (Math.abs(c.temperature) / 50) * 0.2
+      outCtx.fillStyle = c.temperature > 0 ? `rgba(255,176,90,${a})` : `rgba(90,150,255,${a})`
+      outCtx.fillRect(0, 0, w, h)
+      outCtx.globalCompositeOperation = 'source-over'
+    }
+    if (c.tint !== 0) {
+      outCtx.globalCompositeOperation = 'overlay'
+      const a = (Math.abs(c.tint) / 50) * 0.16
+      outCtx.fillStyle = c.tint > 0 ? `rgba(230,120,220,${a})` : `rgba(120,200,140,${a})`
+      outCtx.fillRect(0, 0, w, h)
+      outCtx.globalCompositeOperation = 'source-over'
+    }
+    if (c.highlights !== 0) {
+      outCtx.globalCompositeOperation = c.highlights > 0 ? 'screen' : 'multiply'
+      const a = (Math.abs(c.highlights) / 50) * 0.16
+      outCtx.fillStyle = c.highlights > 0 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a})`
+      outCtx.fillRect(0, 0, w, h)
+      outCtx.globalCompositeOperation = 'source-over'
+    }
+    if (c.shadows !== 0) {
+      outCtx.globalCompositeOperation = c.shadows > 0 ? 'screen' : 'multiply'
+      const a = (Math.abs(c.shadows) / 50) * 0.14
+      outCtx.fillStyle = c.shadows > 0 ? `rgba(180,180,180,${a})` : `rgba(40,40,40,${a})`
+      outCtx.fillRect(0, 0, w, h)
+      outCtx.globalCompositeOperation = 'source-over'
+    }
 
-        applyMaskedLayer(baseCtx, layerCanvas, maskCanvas)
-
-        if (p.ruddy && cheekPaths.length) {
-          drawFeatheredMask(cheekMaskCtx, cheekMaskCanvas, cheekPaths, false, FEATHER_PX)
-          cheekLayerCtx.clearRect(0, 0, w, h)
-          cheekLayerCtx.globalCompositeOperation = 'soft-light'
-          cheekLayerCtx.fillStyle = `rgba(230,90,90,${Math.min(0.75, p.ruddy * pk * 1.4)})`
-          cheekLayerCtx.fillRect(0, 0, w, h)
-          cheekLayerCtx.globalCompositeOperation = 'source-over'
-          applyMaskedLayer(baseCtx, cheekLayerCanvas, cheekMaskCanvas)
-        }
-
-        if (p.eyeEnhance && eyePaths.length) {
-          drawFeatheredMask(eyeMaskCtx, eyeMaskCanvas, eyePaths, false, FEATHER_PX * 0.6)
-          eyeLayerCtx.clearRect(0, 0, w, h)
-          eyeLayerCtx.filter = `brightness(${1 + p.eyeEnhance * pk * 0.5}) contrast(${1 + p.eyeEnhance * pk * 0.35}) saturate(${1 + p.eyeEnhance * pk * 0.3})`
-          eyeLayerCtx.drawImage(video, 0, 0, w, h)
-          eyeLayerCtx.filter = 'none'
-          applyMaskedLayer(baseCtx, eyeLayerCanvas, eyeMaskCanvas)
-        }
+    // 4) Filter — whole-frame color grade, applied last, independent of Beauty Effects/Custom
+    const filter = getColorFilter(current.enabled ? current.filterId : 'none')
+    if (filter.id !== 'none') {
+      if (filter.css) {
+        // Routed through a separate snapshot canvas — drawing a canvas onto itself in one call
+        // can silently misbehave depending on the browser.
+        preFilterCtx.drawImage(outputCanvas, 0, 0)
+        outCtx.filter = filter.css
+        outCtx.drawImage(preFilterCanvas, 0, 0)
+        outCtx.filter = 'none'
       }
-
-      // 3) Custom — whole-frame, independent of Beauty Effects. brightness/contrast/
-      // saturation/vibrance/exposure are true per-draw filter adjustments; temperature/tint/
-      // highlights/shadows are blend-mode overlay approximations (a real per-channel tone
-      // curve needs per-pixel access, which would mean reading back ImageData every frame —
-      // exactly the "expensive CPU work per frame" the brief asked to avoid). sharpness is
-      // folded into a small extra contrast lift for the same reason: a true unsharp mask is a
-      // per-pixel convolution.
-      const c = current.custom
-      const nb = 1 + (c.brightness / 50) * 0.2 + (c.exposure / 50) * 0.25
-      const nc = 1 + (c.contrast / 50) * 0.18 + (c.sharpness / 50) * 0.06
-      const ns = 1 + (c.saturation / 50) * 0.25 + (c.vibrance / 50) * 0.15
-      outCtx.filter = `brightness(${nb}) contrast(${nc}) saturate(${ns})`
-      outCtx.drawImage(baseCanvas, 0, 0)
-      outCtx.filter = 'none'
-
-      if (c.temperature !== 0) {
+      if (filter.tint) {
         outCtx.globalCompositeOperation = 'overlay'
-        const a = (Math.abs(c.temperature) / 50) * 0.2
-        outCtx.fillStyle = c.temperature > 0 ? `rgba(255,176,90,${a})` : `rgba(90,150,255,${a})`
+        outCtx.fillStyle = filter.tint
         outCtx.fillRect(0, 0, w, h)
         outCtx.globalCompositeOperation = 'source-over'
-      }
-      if (c.tint !== 0) {
-        outCtx.globalCompositeOperation = 'overlay'
-        const a = (Math.abs(c.tint) / 50) * 0.16
-        outCtx.fillStyle = c.tint > 0 ? `rgba(230,120,220,${a})` : `rgba(120,200,140,${a})`
-        outCtx.fillRect(0, 0, w, h)
-        outCtx.globalCompositeOperation = 'source-over'
-      }
-      if (c.highlights !== 0) {
-        outCtx.globalCompositeOperation = c.highlights > 0 ? 'screen' : 'multiply'
-        const a = (Math.abs(c.highlights) / 50) * 0.16
-        outCtx.fillStyle = c.highlights > 0 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a})`
-        outCtx.fillRect(0, 0, w, h)
-        outCtx.globalCompositeOperation = 'source-over'
-      }
-      if (c.shadows !== 0) {
-        outCtx.globalCompositeOperation = c.shadows > 0 ? 'screen' : 'multiply'
-        const a = (Math.abs(c.shadows) / 50) * 0.14
-        outCtx.fillStyle = c.shadows > 0 ? `rgba(180,180,180,${a})` : `rgba(40,40,40,${a})`
-        outCtx.fillRect(0, 0, w, h)
-        outCtx.globalCompositeOperation = 'source-over'
-      }
-
-      // 4) Filter — whole-frame color grade, applied last, independent of Beauty Effects/Custom
-      const filter = getColorFilter(current.filterId)
-      if (filter.id !== 'none') {
-        if (filter.css) {
-          // outputCanvas was drawn onto itself here before (outCtx.drawImage(outputCanvas,...)
-          // while outCtx IS outputCanvas's own context) — reading and writing the same bitmap
-          // in one call is exactly the kind of thing that can silently misbehave depending on
-          // the browser. Routing through a separate snapshot canvas removes any ambiguity.
-          preFilterCtx.clearRect(0, 0, w, h)
-          preFilterCtx.drawImage(outputCanvas, 0, 0)
-          outCtx.filter = filter.css
-          outCtx.drawImage(preFilterCanvas, 0, 0)
-          outCtx.filter = 'none'
-        }
-        if (filter.tint) {
-          outCtx.globalCompositeOperation = 'overlay'
-          outCtx.fillStyle = filter.tint
-          outCtx.fillRect(0, 0, w, h)
-          outCtx.globalCompositeOperation = 'source-over'
-        }
       }
     }
-    raf = requestAnimationFrame(draw)
   }
   draw()
 
@@ -507,7 +594,7 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
     },
     async switchCamera() {
       const next = currentFacingMode === 'user' ? 'environment' : 'user'
-      const newRaw = await navigator.mediaDevices.getUserMedia({ video: { facingMode: next }, audio: false })
+      const newRaw = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(next), audio: false })
       rawStream.getVideoTracks().forEach((t) => t.stop())
       const oldAudio = getAudioTrack()
       rawStream = oldAudio ? new MediaStream([newRaw.getVideoTracks()[0], oldAudio]) : newRaw
