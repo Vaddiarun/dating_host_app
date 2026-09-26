@@ -188,7 +188,7 @@ export default function Home() {
           <div className="grid grid-cols-3 gap-3">{[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-2xl bg-black/[.06]" />)}</div>
         </div>
       ) : (
-        <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4 grid gap-4 lg:grid-cols-[1fr_320px] lg:items-start">
+        <div className={`px-5 lg:px-0 pt-3 lg:pt-0 grid gap-4 lg:grid-cols-[1fr_320px] lg:items-start ${state === 'offline' || state === 'online' ? 'pb-24 lg:pb-4' : 'pb-4'}`}>
           {/* main column */}
           <div className="space-y-4">
             <ErrorCard message={err} onRetry={load} compact />
@@ -227,12 +227,6 @@ export default function Home() {
 
           {/* right rail */}
           <div className="space-y-4">
-            {state === 'online' && (
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => nav('/call/incoming')} className="btn-outline text-[13px]">Preview call</button>
-                <button onClick={() => nav('/live')} className="btn-outline text-[13px]">Go live</button>
-              </div>
-            )}
             {state === 'offline' && (
               <div className="hidden lg:block card p-4">
                 <SectionTitle className="mb-2">Today's tip</SectionTitle>
