@@ -239,24 +239,59 @@ export function HostLevel() {
               </p>
             )}
 
-            <SectionTitle className="mt-5 mb-2">All levels</SectionTitle>
-            <div className="card overflow-hidden">
-              <div className="grid grid-cols-[3.5rem_1fr_1fr_1fr] gap-2 px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide text-ink-400 bg-black/[.02]">
-                <span>Level</span><span>Video</span><span>Voice</span><span>Message</span>
-              </div>
-              {data.levels.map((l) => {
-                const current = l.level === data.level
-                return (
-                  <div key={l.level} className={`grid grid-cols-[3.5rem_1fr_1fr_1fr] gap-2 px-4 py-2.5 text-[13px] border-t border-black/5 ${current ? 'bg-gold-50 font-bold text-ink-900' : l.level < data.level ? 'text-ink-400' : 'text-ink-700'}`}>
-                    <span className="flex items-center gap-1">{current && <Icon name="crown" size={12} className="text-gold-500" />}{l.level}</span>
-                    <span>{rupees(l.videoRatePerMinutePaise)}</span>
-                    <span>{rupees(l.voiceRatePerMinutePaise)}</span>
-                    <span>{rupees(l.messageRatePaise)}</span>
-                  </div>
-                )
-              })}
+            <SectionTitle className="mt-5 mb-2">All levels & prices</SectionTitle>
+            <p className="-mt-1 mb-2 text-[12px] text-ink-400">Maximum prices you can charge at each level. Prices are in ₹.</p>
+            {/* A real <table> so columns stay aligned; scrolls sideways on narrow phones
+                instead of squashing six columns into the screen width. */}
+            <div className="card overflow-x-auto">
+              <table className="w-full min-w-[520px] text-left text-[13px]">
+                <thead>
+                  <tr className="bg-black/[.03] text-[11px] font-bold uppercase tracking-wide text-ink-400">
+                    <th className="px-3 py-2.5">Level</th>
+                    <th className="px-3 py-2.5">Unlocks at</th>
+                    <th className="px-3 py-2.5 text-right">Video / min</th>
+                    <th className="px-3 py-2.5 text-right">Voice / min</th>
+                    <th className="px-3 py-2.5 text-right">Per message</th>
+                    <th className="px-3 py-2.5">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.levels.map((l) => {
+                    const current = l.level === data.level
+                    const unlocked = l.level < data.level
+                    return (
+                      <tr key={l.level} className={`border-t border-black/5 ${current ? 'bg-gold-50 font-bold text-ink-900' : unlocked ? 'text-ink-500' : 'text-ink-700'}`}>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1">{current && <Icon name="crown" size={12} className="text-gold-500" />}Level {l.level}</span>
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">{l.requiredLifetimeBeans === 0 ? 'Start' : `${beans(l.requiredLifetimeBeans)} beans`}</td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">{rupees(l.videoRatePerMinutePaise)}</td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">{rupees(l.voiceRatePerMinutePaise)}</td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">{rupees(l.messageRatePaise)}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          {current ? (
+                            <span className="pill bg-gold-400/20 text-gold-600 text-[11px]">Current</span>
+                          ) : unlocked ? (
+                            <span className="pill bg-emerald-50 text-emerald-600 text-[11px]"><Icon name="check" size={11} /> Unlocked</span>
+                          ) : (
+                            <span className="pill bg-black/5 text-ink-400 text-[11px]"><Icon name="lock" size={11} /> {beans(l.requiredLifetimeBeans - data.lifetimeEarnedBeans)} to go</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-            <p className="mt-3 text-[12px] text-ink-400">You move up one level for every {beans(data.beansPerLevel)} beans you earn from calls, gifts and messages.</p>
+
+            <SectionTitle className="mt-5 mb-2">How levels work</SectionTitle>
+            <div className="card p-4 space-y-2.5 text-[13px] text-ink-600">
+              <p>• Everyone starts at <span className="font-semibold text-ink-900">Level 1</span>: ₹30/min video, ₹20/min voice and ₹5 per message.</p>
+              <p>• You move up one level for every <span className="font-semibold text-ink-900">{beans(data.beansPerLevel)} beans</span> you earn from calls, gifts and messages — automatically, no action needed.</p>
+              <p>• Each level raises your maximum video, voice and message price by <span className="font-semibold text-ink-900">₹20</span>. Level {data.maxLevel} is the top.</p>
+              <p>• You can charge less than your maximum in Rate settings. Leave a rate empty to always charge your level's price — it goes up by itself when you level up.</p>
+              <p>• Withdrawing your beans never lowers your level — it's based on everything you've ever earned.</p>
+            </div>
           </>
         )}
       </div>
