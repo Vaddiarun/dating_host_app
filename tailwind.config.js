@@ -67,6 +67,7 @@ export default {
         'glow-breathe': { '0%,100%': { opacity: .35, transform: 'scale(1)' }, '50%': { opacity: .7, transform: 'scale(1.15)' } },
         loadbar: { '0%': { width: '0%' }, '100%': { width: '100%' } },
         'bg-pan': { '0%': { backgroundPosition: '0% 50%' }, '100%': { backgroundPosition: '100% 50%' } },
+        'drop-in': { '0%': { transform: 'translateY(-14px) scale(.96)', opacity: 0 }, '100%': { transform: 'translateY(0) scale(1)', opacity: 1 } },
       },
       animation: {
         'fade-in': 'fade-in .25s ease both',
@@ -80,6 +81,7 @@ export default {
         'glow-breathe': 'glow-breathe 2.6s ease-in-out infinite',
         loadbar: 'loadbar 1.5s cubic-bezier(.4,0,.2,1) .3s both',
         'bg-pan': 'bg-pan 6s ease-in-out infinite alternate',
+        'drop-in': 'drop-in .35s cubic-bezier(.22,1,.36,1) both',
       },
     },
   },
