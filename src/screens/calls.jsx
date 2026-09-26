@@ -155,7 +155,7 @@ export function IncomingCall() {
     setErr('')
     try {
       const res = await callsApi.accept(callId)
-      nav(`/call/connecting?callId=${callId}`, { state: { channelName: res.channelName, agoraToken: res.agoraToken, callerName: res.callerName || callerName, callType: callKind(res) || kind } })
+      nav(`/call/connecting?callId=${callId}`, { state: { channelName: res.channelName, agoraToken: res.agoraToken, callerName: res.callerName || callerName, callerId: res.userId || res.callerId || sp.get('callerId') || undefined, callType: callKind(res) || kind } })
     } catch (e) {
       setErr(errorMessage(e, 'Could not accept this call.'))
     } finally {
@@ -246,7 +246,8 @@ function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose 
 
   const send = async () => {
     const content = text.trim()
-    if (!content || !recipientId || sending) return
+    if (!content || sending) return
+    if (!recipientId) { setErr('Still connecting to the caller — try again in a moment.'); return }
     setSending(true)
     setErr('')
     setText('')
@@ -341,7 +342,7 @@ export function ActiveCall() {
   const location = useLocation()
   const { me } = useAuth()
   const callId = sp.get('callId')
-  const { channelName, agoraToken, callerName: navCallerName, callType: navCallType } = location.state || {}
+  const { channelName, agoraToken, callerName: navCallerName, callerId: navCallerId, callType: navCallType } = location.state || {}
   // null until known — the join below waits for it, since a voice call must never open the camera.
   const [kind, setKind] = useState(() => callKind(navCallType))
   const isVoice = kind === 'voice'
@@ -381,17 +382,6 @@ export function ActiveCall() {
       })
   }, [callId])
 
-  // In-call chat toggle (UX_SCREENS_AND_FLOWS.md's "Video call — ongoing" screen) — a live,
-  // session-scoped log rather than loading the counterpart's full message history, since
-  // that's not what this panel is for.
-  useEffect(() => {
-    const counterpartId = call?.userId
-    if (!counterpartId) return
-    return onSocketEvent('chat:message', (m) => {
-      if (m.senderId !== counterpartId) return
-      setChatMessages((prev) => [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, createdAt: m.createdAt, at: Date.now() }])
-    })
-  }, [call?.userId])
 
   useEffect(() => {
     const t = setInterval(() => setElapsed((s) => s + 1), 1000)
@@ -497,7 +487,7 @@ export function ActiveCall() {
     if (!sessionRef.current?.localVideoTrack) return
     setFlipping(true)
     try {
-      const switched = await switchToNextCamera(sessionRef.current.localVideoTrack, sessionRef.current.beautyCamera)
+      const switched = await switchToNextCamera(sessionRef.current.localVideoTrack, sessionRef.current.beautyCamera, localVideoRef.current)
       if (switched === null) setRtcErr('Only one camera is available on this device.')
     } catch (e) {
       setRtcErr(errorMessage(e, 'Could not switch cameras.'))
@@ -549,7 +539,23 @@ export function ActiveCall() {
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
   const ss = String(elapsed % 60).padStart(2, '0')
   const callerName = call?.callerName || navCallerName || 'Caller'
+  // Who's on the other end — needed to send chat/gift requests. The call record may name it
+  // differently (or fail to load), so the id from the ring itself is the fallback; without one,
+  // sending a message used to silently do nothing.
+  const counterpartId = call?.userId || call?.callerId || navCallerId || null
   const ratePaise = call?.ratePerMinutePaiseSnapshot ?? 0
+
+  // In-call chat toggle (UX_SCREENS_AND_FLOWS.md's "Video call — ongoing" screen) — a live,
+  // session-scoped log rather than loading the counterpart's full message history, since
+  // that's not what this panel is for.
+  useEffect(() => {
+    if (!counterpartId) return
+    return onSocketEvent('chat:message', (m) => {
+      if (m.senderId !== counterpartId) return
+      setChatMessages((prev) => [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, createdAt: m.createdAt, at: Date.now() }])
+    })
+  }, [counterpartId])
+
   const estBeans = Math.round((ratePaise * elapsed) / 60)
 
   const endCall = async () => {
@@ -665,20 +671,20 @@ export function ActiveCall() {
         </div>
         {/* Overlay, not a route — navigating away used to unmount this screen entirely and
             tear down the live Agora session just to ask for a gift. */}
-        {giftOpen && <GiftRequestSheet userId={call?.userId} onClose={() => setGiftOpen(false)} />}
+        {giftOpen && <GiftRequestSheet userId={counterpartId} onClose={() => setGiftOpen(false)} />}
         {/* With the chat closed, new messages from the caller still float up over the video for
             a few seconds (Instagram-live style) instead of arriving unseen. Re-rendered every
             second by the call timer, which is what advances their fade-out. */}
         {!chatOpen && !beautyOpen && (
           <FloatingComments
-            comments={recentComments(chatMessages.filter((m) => m.senderId === call?.userId).map((m) => ({ id: m.id, name: callerName, text: m.content, at: m.at })), 4)}
+            comments={recentComments(chatMessages.filter((m) => m.senderId === counterpartId).map((m) => ({ id: m.id, name: callerName, text: m.content, at: m.at })), 4)}
             className="absolute left-4 right-4 bottom-28 z-20 max-h-[35%] pointer-events-none"
           />
         )}
         {beautyOpen && <CallBeautySheet settings={beauty} onChange={updateBeauty} onClose={closeBeauty} />}
         {chatOpen && (
           <CallChatDrawer
-            recipientId={call?.userId}
+            recipientId={counterpartId}
             recipientName={callerName}
             messages={chatMessages}
             onSend={(m) => setChatMessages((prev) => [...prev, m])}

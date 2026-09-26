@@ -5,11 +5,12 @@ import { StatusBar, PlainHeader, Avatar, Toggle } from '../ui/kit.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
 import { live as liveApi } from '../api/index.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
-import { getBeautySettings, openBeautyCamera } from '../lib/beautyFilter.js'
+import { getBeautySettings, openBeautyCamera, openCameraFacing } from '../lib/beautyFilter.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { ErrorCard } from '../ui/kit.jsx'
 import { errorMessage } from '../lib/errors.js'
 import { FloatingComments, recentComments } from '../ui/FloatingComments.jsx'
+import { EmojiPicker, insertAtCaret } from '../ui/EmojiPicker.jsx'
 import { onSocketEventWhenReady } from '../lib/socket.js'
 
 /* 22 — Go live setup */
@@ -48,8 +49,13 @@ export function GoLive() {
       setCamErr('')
       return
     }
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: true })
+    // Release the current camera first — most phones can't open front and back at once, which
+    // is what made flipping to the back camera fail. Mic is reopened with it.
     streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+    const videoStream = await openCameraFacing(mode, null)
+    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const stream = new MediaStream([...videoStream.getVideoTracks(), ...audioStream.getAudioTracks()])
     streamRef.current = stream
     stream.getAudioTracks().forEach((t) => { t.enabled = mic })
     if (videoRef.current) {
@@ -165,6 +171,9 @@ export function Broadcast() {
   const joinRef = useRef(null) // { key, promise } — see the join effect below
   const leaveTimerRef = useRef(null)
   const msgIdRef = useRef(0)
+  const [chatErr, setChatErr] = useState('')
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const chatInputRef = useRef(null)
   const endedRef = useRef(false)
   const endTimerRef = useRef(null)
 
@@ -182,6 +191,7 @@ export function Broadcast() {
     if (!broadcastId) return
     return onSocketEventWhenReady('live:chat', (msg) => {
       if (msg?.broadcastId && msg.broadcastId !== broadcastId) return
+      if (msg?.senderId && msg.senderId === me?.id) return // our own comment echoed back — already shown
       setChat((c) => [...c, { id: ++msgIdRef.current, n: msg.senderName || 'Viewer', t: msg.content, at: Date.now() }])
     })
   }, [broadcastId])
@@ -290,7 +300,7 @@ export function Broadcast() {
     if (!sessionRef.current?.localVideoTrack) return
     setFlipping(true)
     try {
-      const switched = await switchToNextCamera(sessionRef.current.localVideoTrack, sessionRef.current.beautyCamera)
+      const switched = await switchToNextCamera(sessionRef.current.localVideoTrack, sessionRef.current.beautyCamera, videoContainerRef.current)
       if (switched === null) setRtcErr('Only one camera is available on this device.')
     } catch (e) {
       setRtcErr(errorMessage(e, 'Could not switch cameras.'))
@@ -299,13 +309,22 @@ export function Broadcast() {
     }
   }
 
+  // Shown on screen right away, then confirmed — a failed send used to be swallowed entirely,
+  // so the comment looked sent on the host's screen while viewers never received it.
   const sendChat = async () => {
     const content = text.trim()
     if (!content) return
+    if (!broadcastId) { setChatErr('The broadcast isn\'t live yet — comments can\'t be sent.'); return }
+    const id = ++msgIdRef.current
     setText('')
-    setChat((c) => [...c, { id: ++msgIdRef.current, n: 'You', t: content, at: Date.now() }])
-    if (broadcastId) {
-      try { await liveApi.sendChat(broadcastId, content) } catch { /* best-effort */ }
+    setChatErr('')
+    setChat((c) => [...c, { id, n: 'You', t: content, at: Date.now() }])
+    try {
+      await liveApi.sendChat(broadcastId, content)
+    } catch (e) {
+      setChat((c) => c.filter((m) => m.id !== id))
+      setText(content) // give it back so it can be resent
+      setChatErr(errorMessage(e, 'Comment not sent — check your connection and try again.'))
     }
   }
 
@@ -357,12 +376,22 @@ export function Broadcast() {
             <FloatingComments comments={visibleChat} className="w-full max-w-[480px] px-4 max-h-[40vh]" />
           </div>
         </div>
-        <div className="w-full max-w-[480px] mx-auto pb-6 px-4 flex items-center gap-2">
+        {chatErr && <p className="w-full max-w-[480px] mx-auto px-5 pb-1.5 text-[12px] text-rose-300">{chatErr}</p>}
+        <div className={`w-full max-w-[480px] mx-auto px-4 flex items-center gap-2 ${emojiOpen ? 'pb-2' : 'pb-6'}`}>
           <button onClick={() => setMic((m) => !m)} className={`h-11 w-11 grid place-items-center rounded-full ${mic ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={mic ? 'mic' : 'mic-off'} size={18} /></button>
-          <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Say something…" className="flex-1 rounded-full bg-white/15 border border-white/10 px-4 py-2.5 text-[14px] text-white placeholder:text-white/60 outline-none" />
-          <button onClick={sendChat} className="h-11 w-11 grid place-items-center rounded-full bg-white/12"><Icon name="send" size={19} /></button>
+          {/* Emoji button sits inside the input pill — the row already holds mic/send/end. */}
+          <div className="relative flex-1">
+            <input ref={chatInputRef} value={text} onChange={(e) => { setText(e.target.value); setChatErr('') }} onFocus={() => setEmojiOpen(false)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Say something…" className="w-full rounded-full bg-white/15 border border-white/10 pl-4 pr-11 py-2.5 text-[14px] text-white placeholder:text-white/60 outline-none" />
+            <button onClick={() => setEmojiOpen((o) => !o)} className={`absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 grid place-items-center rounded-full ${emojiOpen ? 'bg-white text-ink-900' : 'text-white/80'}`}><Icon name="smile" size={18} /></button>
+          </div>
+          <button onClick={sendChat} disabled={!text.trim()} className="h-11 w-11 grid place-items-center rounded-full bg-white/12 disabled:opacity-50"><Icon name="send" size={19} /></button>
           <button onClick={end} disabled={ending} className="h-11 w-11 grid place-items-center rounded-full bg-rose-500"><Icon name="x" size={20} /></button>
         </div>
+        {emojiOpen && (
+          <div className="w-full max-w-[480px] mx-auto pb-4">
+            <EmojiPicker dark onPick={(e) => { setText((t) => insertAtCaret(chatInputRef.current, t, e)); setChatErr('') }} />
+          </div>
+        )}
       </div>
     </ImmersiveLayout>
   )

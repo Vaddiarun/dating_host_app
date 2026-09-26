@@ -94,25 +94,47 @@ export async function leaveChannel({ client, localAudioTrack, localVideoTrack, b
   }
 }
 
-/** Switches a published local camera track to the next available camera (front/back on
- * mobile, whatever's next in the list on desktop) without dropping the publish. Returns the
- * deviceId now in use, or null if there's only one camera to switch to.
- * `beautyCamera`, when the session was opened with a beauty filter, drives the swap instead —
- * a custom video track built from a canvas stream has no Agora-native `setDevice()` to call,
- * so the underlying camera is reopened directly and the published track's source is swapped
- * with `replaceTrack` instead. */
-export async function switchToNextCamera(localVideoTrack, beautyCamera) {
+// Which way each plain (non-beauty) camera track is facing — Agora doesn't report it.
+const trackFacing = new WeakMap()
+
+/** Flips a published local camera track front <-> back without dropping the publish. Returns
+ * the facing mode now in use ('user' | 'environment'), or null if there's only one camera.
+ * `beautyCamera`, when the session was opened with the beauty pipeline, drives the swap — the
+ * published track is its canvas output, which stays the same track while the camera behind it
+ * changes, so there is nothing to replace on the Agora side.
+ * Also re-plays the local preview un-mirrored for the back camera (pass `previewEl`): a
+ * mirrored self-view is right for the front camera but makes the back camera look backwards. */
+export async function switchToNextCamera(localVideoTrack, beautyCamera, previewEl) {
+  let facing
   if (beautyCamera) {
-    await beautyCamera.switchCamera()
-    await localVideoTrack.replaceTrack(beautyCamera.videoTrack)
-    return 'switched'
+    try {
+      facing = await beautyCamera.switchCamera()
+    } catch (e) {
+      if (/only one camera/i.test(e?.message || '')) return null
+      throw e
+    }
+  } else {
+    const current = trackFacing.get(localVideoTrack) || 'user'
+    const next = current === 'user' ? 'environment' : 'user'
+    try {
+      // Agora 4.x on mobile accepts a facing mode here — picks the main back lens, rather than
+      // stepping through every camera (phones list ultra-wide/tele lenses too).
+      await localVideoTrack.setDevice({ facingMode: next })
+    } catch {
+      // Desktop / older SDK path: fall back to the next listed camera.
+      const RTC = await sdk()
+      const cameras = await RTC.getCameras()
+      if (cameras.length < 2) return null
+      const currentLabel = localVideoTrack.getMediaStreamTrack?.()?.label
+      const currentIndex = Math.max(0, cameras.findIndex((c) => c.label === currentLabel))
+      await localVideoTrack.setDevice(cameras[(currentIndex + 1) % cameras.length].deviceId)
+    }
+    trackFacing.set(localVideoTrack, next)
+    facing = next
   }
-  const RTC = await sdk()
-  const cameras = await RTC.getCameras()
-  if (cameras.length < 2) return null
-  const currentLabel = localVideoTrack.getMediaStreamTrack?.()?.label
-  const currentIndex = Math.max(0, cameras.findIndex((c) => c.label === currentLabel))
-  const next = cameras[(currentIndex + 1) % cameras.length]
-  await localVideoTrack.setDevice(next.deviceId)
-  return next.deviceId
+  if (previewEl) {
+    localVideoTrack.stop()
+    localVideoTrack.play(previewEl, { fit: 'cover', mirror: facing === 'user' })
+  }
+  return facing
 }

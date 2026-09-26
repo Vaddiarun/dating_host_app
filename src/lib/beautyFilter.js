@@ -105,6 +105,41 @@ function cameraConstraints(facingMode) {
   return { facingMode, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
 }
 
+const BACK_LABEL = /back|rear|environment|world/i
+const FRONT_LABEL = /front|user|face|selfie/i
+
+/**
+ * Opens the camera facing `facingMode` ('user' | 'environment'), video only. Plain
+ * `facingMode: 'environment'` is only a preference — plenty of phones/WebViews quietly hand the
+ * front camera back — so this asks for it as `exact` first, then falls back to picking a camera
+ * by its label, and finally to any camera other than `avoidDeviceId` (the one being switched
+ * away from). Throws if the only camera available is the one being avoided.
+ *
+ * The caller must release its current camera BEFORE calling this: most Android phones can't
+ * have the front and back cameras open at the same time, and the second open fails with
+ * NotReadableError — which was the "back camera never comes on" bug.
+ */
+export async function openCameraFacing(facingMode, avoidDeviceId) {
+  const base = cameraConstraints(facingMode)
+  const isNew = (stream) => {
+    const id = stream.getVideoTracks()[0]?.getSettings?.().deviceId
+    return !avoidDeviceId || !id || id !== avoidDeviceId
+  }
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: { ...base, facingMode: { exact: facingMode } }, audio: false })
+    if (isNew(s)) return s
+    s.getTracks().forEach((t) => t.stop())
+  } catch {
+    // OverconstrainedError (desktop webcams report no facingMode) — try by device below
+  }
+  const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput' && d.deviceId !== avoidDeviceId)
+  const wanted = facingMode === 'environment' ? BACK_LABEL : FRONT_LABEL
+  const pick = cams.find((d) => wanted.test(d.label)) || cams[0]
+  if (!pick) throw new Error('Only one camera is available on this device.')
+  const { facingMode: _ignored, ...rest } = base
+  return navigator.mediaDevices.getUserMedia({ video: { ...rest, deviceId: { exact: pick.deviceId } }, audio: false })
+}
+
 /**
  * Opens a camera (+ mic, optional) and returns a live-processed MediaStream running the full
  * Beauty Effects + Filter + Custom pipeline, plus controls to live-update settings, switch
@@ -592,17 +627,35 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
     captureBlob(type = 'image/jpeg', quality = 0.92) {
       return new Promise((resolve) => outputCanvas.toBlob(resolve, type, quality))
     },
+    /** Flips front <-> back. The output track (what Agora publishes) never changes — only the
+     * camera feeding the canvas does — so nothing downstream needs re-attaching. If the other
+     * camera can't be opened, the original one is reopened so the stream doesn't go black. */
     async switchCamera() {
       const next = currentFacingMode === 'user' ? 'environment' : 'user'
-      const newRaw = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(next), audio: false })
-      rawStream.getVideoTracks().forEach((t) => t.stop())
+      const oldTrack = rawStream.getVideoTracks()[0]
+      const oldDeviceId = oldTrack?.getSettings?.().deviceId
       const oldAudio = getAudioTrack()
-      rawStream = oldAudio ? new MediaStream([newRaw.getVideoTracks()[0], oldAudio]) : newRaw
-      currentFacingMode = next
-      video.srcObject = rawStream
-      await video.play().catch(() => {})
+      const attach = (videoStream, facing) => {
+        const vt = videoStream.getVideoTracks()[0]
+        rawStream = oldAudio ? new MediaStream([vt, oldAudio]) : videoStream
+        currentFacingMode = facing
+        video.srcObject = rawStream
+        return video.play().catch(() => {})
+      }
+      oldTrack?.stop() // release first — see openCameraFacing
+      try {
+        await attach(await openCameraFacing(next, oldDeviceId), next)
+      } catch (e) {
+        await attach(await openCameraFacing(currentFacingMode), currentFacingMode).catch(() => {})
+        throw e
+      }
+      // Fresh camera, fresh geometry — don't ease the old face mask across to the new view.
+      targetFaces = []
+      smoothedFaces = []
+      presence = 0
       return next
     },
+    get facingMode() { return currentFacingMode },
     /** How many faces detection currently sees — 0 means Beauty Effects has nothing to apply
      * to yet (no faces found), separate from `enabled`/preset selection. Exposed so this can
      * be surfaced in the UI as a direct diagnostic instead of guessing whether "no visible
