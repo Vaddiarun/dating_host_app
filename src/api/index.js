@@ -94,7 +94,6 @@ export const gifts = {
 }
 
 export const live = {
-  adultModeStatus: () => apiFetch('/live/adult-mode'),
   start: (title) => apiFetch('/live/broadcasts', { method: 'POST', body: { title } }),
   get: (id) => apiFetch(`/live/broadcasts/${id}`),
   sendChat: (id, content) => apiFetch(`/live/broadcasts/${id}/chat`, { method: 'POST', body: { content } }),
