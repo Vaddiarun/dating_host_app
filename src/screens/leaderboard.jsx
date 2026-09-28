@@ -153,7 +153,7 @@ function Leaderboard({ title, data, coinRain }) {
   const rest = list.slice(3)
 
   return (
-    <AppLayout title={title} back maxW="lg" bg="white" pad={false}>
+    <AppLayout title={title} back maxW="xl" bg="white" pad={false}>
       {coinRain && <CoinRain />}
       <div className="lg:hidden bg-gradient-to-br from-brand-700 via-brand-800 to-night-900 rounded-b-3xl">
         <Header title={title} />
@@ -168,13 +168,16 @@ function Leaderboard({ title, data, coinRain }) {
       </div>
       <FloatingGoLive />
 
-      {/* desktop */}
-      <div className="hidden lg:block px-8 py-8">
-        <div className="flex items-center justify-between mb-4">
-          <Segmented options={['This Week', 'Last Week']} value={week} onChange={setWeek} />
+      {/* desktop — the same podium as phone in a card on the left, the rest of the ranking on the right */}
+      <div className="hidden lg:grid lg:grid-cols-[400px_1fr] lg:gap-6 lg:items-start px-8 py-8">
+        <div className="sticky top-6 rounded-3xl bg-gradient-to-br from-brand-700 via-brand-800 to-night-900 pt-5 overflow-hidden shadow-pop">
+          <div className="flex justify-center px-5">
+            <WeekToggle value={week} onChange={setWeek} />
+          </div>
+          <Podium top3={top3} />
         </div>
         <div className="card p-4 divide-y divide-black/5">
-          {list.map((p, i) => <Row key={p.name} rank={i + 1} p={p} />)}
+          {rest.map((p, i) => <Row key={p.name} rank={i + 4} p={p} />)}
         </div>
       </div>
     </AppLayout>

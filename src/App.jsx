@@ -11,6 +11,7 @@ import { CallsList, IncomingCall, Connecting, ActiveCall, CallSummary } from './
 import { ChatList, ChatConvo } from './screens/chat.jsx'
 import { GoLive, Broadcast, LiveSummary } from './screens/live.jsx'
 import { Earnings, Breakdown, EarningsHistory, Statement } from './screens/earnings.jsx'
+import { DailyReport } from './screens/dailyReport.jsx'
 import { Withdraw, WithdrawConfirm, WithdrawStatus } from './screens/withdraw.jsx'
 import { Settings, KycStatus, EditProfile, RateSettings, HostLevel, Gallery, PayoutDetails, NotificationSettings, HelpSupport } from './screens/settings.jsx'
 import {
@@ -72,6 +73,7 @@ export default function App() {
           <Route path="/live/summary" element={<LiveSummary />} />
 
           <Route path="/earnings" element={<Earnings />} />
+          <Route path="/earnings/daily" element={<DailyReport />} />
           <Route path="/earnings/breakdown" element={<Breakdown />} />
           <Route path="/earnings/history" element={<EarningsHistory />} />
           <Route path="/earnings/statement" element={<Statement />} />

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate, NavLink, useLocation } from 'react-router-dom'
 import Icon from './Icon.jsx'
-import { me } from '../data.js'
+import logoUrl from '../assets/logo.png'
+import { useAuth } from '../state/AuthContext.jsx'
 import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 
 /* ============ Phone status bar (mobile only) ============ */
@@ -87,11 +88,13 @@ export function FloatingGoLive() {
 /* ============ Desktop sidebar ============ */
 export function SideNav() {
   const nav = useNavigate()
+  const { me } = useAuth()
+  const name = me?.name || 'Host'
   const { unreadCount } = useNotificationsCount()
   return (
-    <aside className="hidden lg:flex w-[248px] shrink-0 flex-col border-r border-black/5 bg-white">
+    <aside className="hidden lg:flex lg:sticky lg:top-0 lg:h-[100dvh] lg:self-start w-[248px] shrink-0 flex-col border-r border-black/5 bg-white">
       <div className="flex items-center gap-2.5 px-5 h-16 border-b border-black/5">
-        <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-600" />
+        <img src={logoUrl} alt="" className="h-9 w-9" />
         <span className="text-[17px] font-extrabold text-ink-900">Splash</span>
       </div>
       <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-4 space-y-1">
@@ -116,8 +119,8 @@ export function SideNav() {
         </div>
       </nav>
       <button onClick={() => nav('/settings')} className="m-3 flex items-center gap-3 rounded-xl border border-black/5 p-3 text-left hover:bg-black/[.02]">
-        <Avatar name={me.name} size={38} />
-        <div className="min-w-0"><p className="text-[13px] font-bold text-ink-900 truncate">{me.name}</p><p className="text-[11px] text-emerald-600 font-semibold">● Online</p></div>
+        <Avatar name={name} size={38} src={me?.avatarUrl} />
+        <div className="min-w-0"><p className="text-[13px] font-bold text-ink-900 truncate">{name}</p><p className="text-[11px] text-emerald-600 font-semibold">● Online</p></div>
       </button>
     </aside>
   )
@@ -126,6 +129,7 @@ export function SideNav() {
 /* ============ Desktop top bar ============ */
 export function DesktopTopBar({ title, back }) {
   const nav = useNavigate()
+  const { me } = useAuth()
   const { unreadCount } = useNotificationsCount()
   return (
     <header className="hidden lg:flex h-16 shrink-0 items-center gap-3 border-b border-black/5 bg-white px-8">
@@ -141,7 +145,9 @@ export function DesktopTopBar({ title, back }) {
           {unreadCount > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 grid place-items-center rounded-full bg-brand-600 text-white text-[10px]">{unreadCount}</span>}
         </button>
         <button onClick={() => nav('/earnings')} className="h-9 w-9 grid place-items-center rounded-xl border border-black/10 text-ink-600 hover:bg-black/[.03]"><Icon name="wallet" size={18} /></button>
-        <Avatar name={me.name} size={34} />
+        <button onClick={() => nav('/settings')} className="rounded-full hover:ring-2 hover:ring-brand-200 transition" aria-label="Profile & settings">
+          <Avatar name={me?.name || 'Host'} size={34} src={me?.avatarUrl} />
+        </button>
       </div>
     </header>
   )

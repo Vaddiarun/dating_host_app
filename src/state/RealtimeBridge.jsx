@@ -2,40 +2,54 @@ import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext.jsx'
 import { getSocket, onSocketEvent } from '../lib/socket.js'
-import { unlockAudio } from '../lib/sound.js'
+import { unlockAudio, playChime } from '../lib/sound.js'
 import { beans as formatBeans } from '../lib/format.js'
 import Icon from '../ui/Icon.jsx'
+import { GiftRays, ConfettiBurst, FloatingSparkles, useCountUpFrom0 } from '../ui/GiftCelebration.jsx'
 
-/** A gift is a real-money, worth-celebrating moment — centered like a real celebration
- * rather than tucked in a corner, with a soft backdrop so it actually reads as a moment.
- * Tapping the backdrop (or the card's own dismiss) closes it early; otherwise it clears
- * itself. Sits on its own regardless of what screen is behind it (light or the dark
- * call/live screens), so it's a solid white card rather than something theme-matched. */
+const GIFT_POPUP_MS = 5000
+
+/** A gift is a real-money, worth-celebrating moment â€” centered like a real celebration
+ * rather than tucked in a corner: the gift pops in over spinning light rays, confetti bursts
+ * out of it, sparkles drift up, and the credited beans count up. A thin bar shows when it will
+ * close by itself. Tapping the backdrop (or the card's own dismiss) closes it early. Sits on
+ * its own regardless of what screen is behind it (light or the dark call/live screens), so
+ * it's a solid white card rather than something theme-matched. */
 function GiftPopup({ data, onClose }) {
+  const beans = useCountUpFrom0(data.beansCredited)
   return (
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center px-6 bg-ink-900/25 animate-fade-in"
+      className="fixed inset-0 z-[1000] flex items-center justify-center px-6 bg-ink-900/35 backdrop-blur-[2px] animate-fade-in"
       onClick={onClose}
+      role="alertdialog"
+      aria-label={data.senderName ? `${data.senderName} sent you ${data.giftName}, ${data.beansCredited} beans` : `Gift received: ${data.giftName}`}
     >
       <div
-        className="relative w-full max-w-[320px] rounded-3xl bg-white shadow-pop overflow-hidden animate-drop-in"
+        className="relative w-full max-w-[320px] rounded-3xl bg-white shadow-pop overflow-hidden animate-pop-in"
         onClick={(e) => e.stopPropagation()}
       >
-        <button onClick={onClose} className="absolute top-3 right-3 h-7 w-7 grid place-items-center rounded-full text-ink-300 hover:bg-black/5 hover:text-ink-500">
+        <FloatingSparkles seed={data.at} />
+        <button onClick={onClose} className="absolute z-10 top-3 right-3 h-7 w-7 grid place-items-center rounded-full text-ink-300 hover:bg-black/5 hover:text-ink-500" aria-label="Close">
           <Icon name="x" size={14} />
         </button>
-        <div className="relative flex flex-col items-center text-center px-6 pt-8 pb-5">
-          <span className="pointer-events-none absolute top-2 h-28 w-28 rounded-full bg-gold-300/40 blur-2xl animate-glow-breathe" />
-          <span className="relative grid place-items-center h-16 w-16 rounded-2xl bg-gradient-to-br from-gold-300 to-gold-500 text-white shadow-[0_10px_28px_-8px_rgba(224,169,46,.8)] animate-logo-in">
-            <Icon name="gift" size={28} />
-          </span>
-          <h2 className="mt-4 text-[18px] font-extrabold text-ink-900">{data.senderName ? `${data.senderName} sent a gift!` : 'Gift received!'}</h2>
-          <p className="text-[13px] text-ink-500 mt-0.5">{data.giftName}</p>
+        <div className="relative flex flex-col items-center text-center px-6 pt-9 pb-5">
+          <div className="relative grid place-items-center h-24 w-24">
+            <GiftRays size={250} />
+            <span className="pointer-events-none absolute h-28 w-28 rounded-full bg-gold-300/40 blur-2xl animate-glow-breathe" />
+            <ConfettiBurst seed={data.at} />
+            <span className="relative grid place-items-center h-[72px] w-[72px] rounded-[22px] bg-gradient-to-br from-gold-300 to-gold-500 text-white shadow-[0_12px_30px_-8px_rgba(224,169,46,.9)] gift-pop">
+              <Icon name="gift" size={32} />
+            </span>
+          </div>
+          <h2 className="relative mt-3 text-[18px] font-extrabold text-ink-900 animate-slide-up" style={{ animationDelay: '250ms' }}>{data.senderName ? `${data.senderName} sent a gift!` : 'Gift received!'}</h2>
+          <p className="relative text-[13px] text-ink-500 mt-0.5 animate-slide-up" style={{ animationDelay: '330ms' }}>{data.giftName}</p>
         </div>
-        <div className="flex items-center justify-between px-6 py-3 bg-gold-50/70 border-t border-black/5">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-gold-600">Credited to your balance</span>
-          <span className="text-[16px] font-extrabold text-gold-600">+{formatBeans(data.beansCredited)} beans</span>
+        <div className="gift-shine flex items-center justify-between px-6 py-3 bg-gold-50/80 border-t border-black/5">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-gold-600 whitespace-nowrap">Added to balance</span>
+          <span className="text-[17px] font-extrabold text-gold-600 tabular-nums whitespace-nowrap">+{formatBeans(beans)} beans</span>
         </div>
+        {/* auto-dismiss countdown */}
+        <span className="block h-[3px] bg-gold-400/70 gift-timer" style={{ animationDuration: `${GIFT_POPUP_MS}ms` }} />
       </div>
     </div>
   )
@@ -47,13 +61,13 @@ function GiftPopup({ data, onClose }) {
 export default function RealtimeBridge() {
   const { status, refreshMe } = useAuth()
   const nav = useNavigate()
-  const [toast, setToast] = useState(null) // { icon, title } | null — quiet one-liners
+  const [toast, setToast] = useState(null) // { icon, title } | null â€” quiet one-liners
   const [gift, setGift] = useState(null) // { senderName?, giftName, beansCredited } | null
   const toastTimerRef = useRef(null)
   const giftTimerRef = useRef(null)
 
   // The incoming-call ringtone fires from an async socket push, with no click/tap happening
-  // at that exact moment — a browser only lets audio actually play if its AudioContext was
+  // at that exact moment â€” a browser only lets audio actually play if its AudioContext was
   // resumed from inside a real user gesture, so without this the ring would be silently
   // dropped the very first time a call comes in. Any tap/keypress anywhere in the app while
   // logged in warms it up ahead of time, well before a real call needs it.
@@ -82,8 +96,11 @@ export default function RealtimeBridge() {
 
     const showGift = (data) => {
       clearTimeout(giftTimerRef.current)
-      setGift(data)
-      giftTimerRef.current = setTimeout(() => setGift(null), 5000)
+      // `at` keys the popup, so a second gift arriving while one is showing replays the
+      // celebration instead of silently swapping the text.
+      setGift({ ...data, at: Date.now() })
+      try { playChime() } catch { /* audio not unlocked yet â€” the visual still plays */ }
+      giftTimerRef.current = setTimeout(() => setGift(null), GIFT_POPUP_MS)
     }
 
     const attach = () => {
@@ -96,13 +113,13 @@ export default function RealtimeBridge() {
       unsubs.push(onSocketEvent('call:incoming', ({ callId, userId, callerName, ratePerMinutePaise, type, callType }) => {
         const params = new URLSearchParams({ callId, callerId: userId ?? '', rate: ratePerMinutePaise ?? '' })
         if (callerName) params.set('callerName', callerName)
-        // voice vs video — IncomingCall falls back to fetching the call if this isn't in the payload
+        // voice vs video â€” IncomingCall falls back to fetching the call if this isn't in the payload
         if (type || callType) params.set('type', type || callType)
         nav(`/call/incoming?${params.toString()}`)
       }))
 
       // call:ended also fires for a call that rang out unanswered or was declined
-      // (status: "missed" | "rejected") — the host is on /call/incoming or
+      // (status: "missed" | "rejected") â€” the host is on /call/incoming or
       // /call/connecting then, not /call/active, and there's nothing to summarize.
       unsubs.push(onSocketEvent('call:ended', ({ callId, status: callStatus }) => {
         const hash = window.location.hash
@@ -121,14 +138,14 @@ export default function RealtimeBridge() {
 
       // Levels go up automatically on the backend as earnings cross each 1,00,000-bean mark.
       unsubs.push(onSocketEvent('host:level-up', ({ level }) => {
-        showToast('crown', `Level up! You're now Level ${level} — your max prices went up`)
+        showToast('crown', `Level up! You're now Level ${level} â€” your max prices went up`)
       }))
 
       unsubs.push(onSocketEvent('gift:requestDeclined', () => {
         showToast('gift', 'Gift request declined')
       }))
 
-      // Only steer navigation while the host is somewhere in the onboarding flow —
+      // Only steer navigation while the host is somewhere in the onboarding flow â€”
       // once approved they're on the real app and this shouldn't ever fire again anyway.
       unsubs.push(onSocketEvent('kyc:decision', async ({ status: kycStatus, rejectionReason }) => {
         const me = await refreshMe().catch(() => null)
@@ -158,7 +175,7 @@ export default function RealtimeBridge() {
           </div>
         </div>
       )}
-      {gift && <GiftPopup data={gift} onClose={() => { clearTimeout(giftTimerRef.current); setGift(null) }} />}
+      {gift && <GiftPopup key={gift.at} data={gift} onClose={() => { clearTimeout(giftTimerRef.current); setGift(null) }} />}
     </>
   )
 }

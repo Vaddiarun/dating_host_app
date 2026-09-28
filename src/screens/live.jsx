@@ -36,9 +36,13 @@ export function GoLive() {
   // processing, which looked like a bug (blurry background) even though it was "by design."
   // Running the real pipeline here instead means this setup screen shows exactly what the
   // broadcast will actually look like, camera-flip included, not an approximation of it.
-  const openCamera = async (mode) => {
+  // `alive()` says whether this screen still wants the camera once the (slow) open resolves —
+  // if it was left or re-mounted in the meantime, the freshly opened camera is released
+  // straight away instead of staying on (and locking the device) with nothing showing it.
+  const openCamera = async (mode, alive = () => true) => {
     if (useBeautyCam) {
       const cam = await openBeautyCamera({ facingMode: mode, settings: beauty, audio: true })
+      if (!alive()) { cam.stop(); return }
       beautyCamRef.current = cam
       cam.audioTrack && (cam.audioTrack.enabled = mic)
       if (videoRef.current) {
@@ -54,8 +58,9 @@ export function GoLive() {
     streamRef.current?.getTracks().forEach((t) => t.stop())
     streamRef.current = null
     const videoStream = await openCameraFacing(mode, null)
-    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const stream = new MediaStream([...videoStream.getVideoTracks(), ...audioStream.getAudioTracks()])
+    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null)
+    const stream = new MediaStream([...videoStream.getVideoTracks(), ...(audioStream?.getAudioTracks() || [])])
+    if (!alive()) { stream.getTracks().forEach((t) => t.stop()); return }
     streamRef.current = stream
     stream.getAudioTracks().forEach((t) => { t.enabled = mic })
     if (videoRef.current) {
@@ -75,7 +80,7 @@ export function GoLive() {
 
   useEffect(() => {
     let cancelled = false
-    openCamera('user').catch((e) => !cancelled && setCamErr(errorMessage(e, 'Camera unavailable — check permissions.')))
+    openCamera('user', () => !cancelled).catch((e) => !cancelled && setCamErr(errorMessage(e, 'Camera unavailable — check permissions.')))
     return () => {
       cancelled = true
       stopCamera()
@@ -119,31 +124,36 @@ export function GoLive() {
   }
 
   return (
-    <AppLayout tab="/live" title="Go live" maxW="md" bg="white">
+    <AppLayout tab="/live" title="Go live" maxW="xl" bg="white">
       <PlainHeader title="Go live" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
+      {/* Laptop: big camera preview on the left, stream settings + start on the right. */}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4 lg:grid lg:grid-cols-[1fr_340px] lg:gap-6 lg:items-start">
         <div className="relative aspect-[4/3] lg:aspect-video rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-brand-700">
-          {camReady && (
-            <video
-              ref={videoRef}
-              playsInline
-              muted
-              className="absolute inset-0 h-full w-full object-cover"
-              style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
-            />
-          )}
+          {/* Always mounted — it used to render only after camReady, but the stream is attached
+              just before that, when the element didn't exist yet, so the preview stayed blank
+              while the label said "Camera ready". Hidden until the camera is actually live. */}
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${camReady ? 'opacity-100' : 'opacity-0'}`}
+            style={{ transform: facingMode === 'user' ? 'scaleX(-1)' : 'none' }}
+          />
           <div className="absolute inset-x-3 bottom-3 flex items-center justify-between">
             <span className="pill bg-black/40 text-white text-[12px]">{camErr ? camErr : camReady ? 'Camera ready · HD' : 'Starting camera…'}</span>
             <button onClick={flipCamera} disabled={flipping || !camReady} className="h-9 w-9 grid place-items-center rounded-full bg-black/40 text-white disabled:opacity-50"><Icon name="flip" size={16} /></button>
           </div>
         </div>
-        <div className="mt-4"><span className="label">Stream title</span><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
+        <div className="lg:card lg:p-5">
+        <div className="mt-4 lg:mt-0"><span className="label">Stream title</span><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
         <div className="card mt-4 p-4 divide-y divide-black/5">
           <div className="flex items-center gap-3 pb-3"><Icon name="mic" size={18} className="text-ink-500" /><span className="flex-1 text-[15px] font-semibold text-ink-900">Microphone</span><Toggle on={mic} onChange={setMic} /></div>
           <div className="flex items-center gap-3 pt-3"><Icon name="gift" size={18} className="text-ink-500" /><span className="flex-1 text-[15px] font-semibold text-ink-900">Allow gifts</span><Toggle on={gifts} onChange={setGifts} /></div>
         </div>
         <ErrorCard message={err} compact className="mt-3" />
         <button onClick={start} disabled={busy} className="btn-primary mt-4 disabled:opacity-60"><Icon name="video" size={17} /> {busy ? 'Starting…' : 'Start broadcast'}</button>
+        </div>
       </div>
     </AppLayout>
   )
@@ -324,7 +334,10 @@ export function Broadcast() {
     } catch (e) {
       setChat((c) => c.filter((m) => m.id !== id))
       setText(content) // give it back so it can be resent
-      setChatErr(errorMessage(e, 'Comment not sent — check your connection and try again.'))
+      // Backend: 404 = broadcast already ended, 403 = not allowed to chat here.
+      setChatErr(e?.status === 404 ? 'This broadcast has ended — comments are closed.'
+        : e?.status === 403 ? "You can't comment on this broadcast."
+        : errorMessage(e, 'Comment not sent — check your connection and try again.'))
     }
   }
 
@@ -381,7 +394,7 @@ export function Broadcast() {
           <button onClick={() => setMic((m) => !m)} className={`h-11 w-11 grid place-items-center rounded-full ${mic ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={mic ? 'mic' : 'mic-off'} size={18} /></button>
           {/* Emoji button sits inside the input pill — the row already holds mic/send/end. */}
           <div className="relative flex-1">
-            <input ref={chatInputRef} value={text} onChange={(e) => { setText(e.target.value); setChatErr('') }} onFocus={() => setEmojiOpen(false)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Say something…" className="w-full rounded-full bg-white/15 border border-white/10 pl-4 pr-11 py-2.5 text-[14px] text-white placeholder:text-white/60 outline-none" />
+            <input ref={chatInputRef} value={text} maxLength={2000} onChange={(e) => { setText(e.target.value); setChatErr('') }} onFocus={() => setEmojiOpen(false)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Say something…" className="w-full rounded-full bg-white/15 border border-white/10 pl-4 pr-11 py-2.5 text-[14px] text-white placeholder:text-white/60 outline-none" />
             <button onClick={() => setEmojiOpen((o) => !o)} className={`absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 grid place-items-center rounded-full ${emojiOpen ? 'bg-white text-ink-900' : 'text-white/80'}`}><Icon name="smile" size={18} /></button>
           </div>
           <button onClick={sendChat} disabled={!text.trim()} className="h-11 w-11 grid place-items-center rounded-full bg-white/12 disabled:opacity-50"><Icon name="send" size={19} /></button>

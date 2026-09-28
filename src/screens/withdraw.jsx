@@ -4,8 +4,9 @@ import Icon from '../ui/Icon.jsx'
 import { PlainHeader, ResultScreen, KV, IconBadge, ErrorCard } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { withdrawals as withdrawalsApi, earnings as earningsApi, profile as profileApi, config as configApi } from '../api/index.js'
-import { rupees, rupeesRaw } from '../lib/format.js'
+import { rupees, rupeesRaw, referenceCode } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
+import { Skel, SkelGroup, SkelResult } from '../ui/Skeleton.jsx'
 
 /* 29 — Withdraw */
 export function Withdraw() {
@@ -42,45 +43,55 @@ export function Withdraw() {
   }
 
   return (
-    <AppLayout tab="/earnings" title="Withdraw" maxW="md" bg="canvas">
+    <AppLayout tab="/earnings" title="Withdraw" maxW="lg" bg="canvas">
       <PlainHeader title="Withdraw" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
-        <ErrorCard message={loadErr} onRetry={load} className="mb-3" />
-        <div className="rounded-2xl bg-gold-50 px-4 py-3.5 flex items-center justify-between">
-          <span className="text-[14px] font-semibold text-gold-600">Available balance</span>
-          <span className="text-[20px] font-extrabold text-gold-500">{rupees(availablePaise)}</span>
-        </div>
-        <div className="mt-4">
-          <span className="label">Amount</span>
-          <input value={`₹ ${amt}`} onChange={(e) => setAmt(e.target.value.replace(/[^\d]/g, ''))} className={`input text-[16px] ${tooLow || tooHigh ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : ''}`} />
-          {tooLow && <p className="text-[12px] text-rose-500 mt-1">Minimum withdrawal is ₹ 10</p>}
-          {tooHigh && <p className="text-[12px] text-rose-500 mt-1">Exceeds available balance</p>}
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          {['₹ 500', '₹ 1,000', 'Max'].map((q) => (
-            <button key={q} onClick={() => setAmt(q === 'Max' ? String(availableRupees) : q.replace(/[₹, ]/g, ''))} className="rounded-xl border border-black/10 bg-white py-2.5 text-[13px] font-semibold text-ink-700">{q}</button>
-          ))}
-        </div>
-        {primary ? (
-          <div className="card mt-3 p-3.5 flex items-center gap-3">
-            <IconBadge name="card" tone="brand" />
-            <div className="flex-1">
-              <p className="text-[14px] font-semibold text-ink-900">{primary.type === 'upi' ? primary.details?.vpa : `${primary.details?.accountHolderName || 'Bank'} •••• ${String(primary.details?.accountNumber || '').slice(-4)}`}</p>
-              <p className="text-[12px] text-ink-400">{primary.type === 'upi' ? 'UPI' : 'Bank transfer'}</p>
-            </div>
-            <span className="h-6 w-6 grid place-items-center rounded-full bg-emerald-500 text-white"><Icon name="check" size={13} /></span>
+      {/* Phone: one column in the order-* sequence. Laptop: balance + payout method on the
+          left, the amount form in a card on the right (wrappers are display:contents on phone). */}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4 flex flex-col lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
+        <ErrorCard message={loadErr} onRetry={load} className="mb-3 order-first lg:col-span-2" />
+        <div className="contents lg:block lg:space-y-3">
+          <div className="order-1 rounded-2xl bg-gold-50 px-4 py-3.5 lg:py-6 flex items-center justify-between lg:flex-col lg:items-start lg:gap-1">
+            <span className="text-[14px] font-semibold text-gold-600">Available balance</span>
+            {!summary && !loadErr
+              ? <Skel className="h-6 lg:h-9 w-32 lg:w-44 rounded-lg" />
+              : <span className="text-[20px] lg:text-[32px] font-extrabold text-gold-500">{rupees(availablePaise)}</span>}
           </div>
-        ) : (
-          <button onClick={() => nav('/settings/payouts/add')} className="card mt-3 p-3.5 flex items-center gap-3 w-full text-left">
-            <IconBadge name="card" tone="gold" />
-            <div className="flex-1"><p className="text-[14px] font-semibold text-ink-900">Add a payout method</p><p className="text-[12px] text-ink-400">Required before withdrawing</p></div>
-          </button>
-        )}
-        <div className="mt-3 flex items-start gap-2 rounded-xl bg-black/[.04] px-3 py-2.5 text-[12px] text-ink-400">
-          <Icon name="clock" size={14} className="mt-0.5 shrink-0" /> KYC must be approved before your first withdrawal.
+          <div className="order-4">
+          {primary ? (
+            <div className="card mt-3 lg:mt-0 p-3.5 flex items-center gap-3">
+              <IconBadge name="card" tone="brand" />
+              <div className="flex-1">
+                <p className="text-[14px] font-semibold text-ink-900">{primary.type === 'upi' ? primary.details?.vpa : `${primary.details?.accountHolderName || 'Bank'} •••• ${String(primary.details?.accountNumber || '').slice(-4)}`}</p>
+                <p className="text-[12px] text-ink-400">{primary.type === 'upi' ? 'UPI' : 'Bank transfer'}</p>
+              </div>
+              <span className="h-6 w-6 grid place-items-center rounded-full bg-emerald-500 text-white"><Icon name="check" size={13} /></span>
+            </div>
+          ) : (
+            <button onClick={() => nav('/settings/payouts/add')} className="card mt-3 lg:mt-0 p-3.5 flex items-center gap-3 w-full text-left">
+              <IconBadge name="card" tone="gold" />
+              <div className="flex-1"><p className="text-[14px] font-semibold text-ink-900">Add a payout method</p><p className="text-[12px] text-ink-400">Required before withdrawing</p></div>
+            </button>
+          )}
+          </div>
+          <div className="order-5 mt-3 lg:mt-0 flex items-start gap-2 rounded-xl bg-black/[.04] px-3 py-2.5 text-[12px] text-ink-400">
+            <Icon name="clock" size={14} className="mt-0.5 shrink-0" /> KYC must be approved before your first withdrawal.
+          </div>
         </div>
-        <ErrorCard message={err} compact className="mt-2" />
-        <button onClick={go} className={`btn-primary mt-4 ${tooLow || tooHigh ? 'opacity-60' : ''}`}>Continue</button>
+        <div className="contents lg:block lg:card lg:p-5">
+          <div className="order-2 mt-4 lg:mt-0">
+            <span className="label">Amount</span>
+            <input value={`₹ ${amt}`} onChange={(e) => setAmt(e.target.value.replace(/[^\d]/g, ''))} className={`input text-[16px] ${tooLow || tooHigh ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : ''}`} />
+            {tooLow && <p className="text-[12px] text-rose-500 mt-1">Minimum withdrawal is ₹ 10</p>}
+            {tooHigh && <p className="text-[12px] text-rose-500 mt-1">Exceeds available balance</p>}
+          </div>
+          <div className="order-3 mt-3 grid grid-cols-3 gap-2">
+            {['₹ 500', '₹ 1,000', 'Max'].map((q) => (
+              <button key={q} onClick={() => setAmt(q === 'Max' ? String(availableRupees) : q.replace(/[₹, ]/g, ''))} className="rounded-xl border border-black/10 bg-white py-2.5 text-[13px] font-semibold text-ink-700">{q}</button>
+            ))}
+          </div>
+          <ErrorCard message={err} compact className="order-6 mt-2" />
+          <button onClick={go} className={`order-7 btn-primary mt-4 ${tooLow || tooHigh ? 'opacity-60' : ''}`}>Continue</button>
+        </div>
       </div>
     </AppLayout>
   )
@@ -188,7 +199,7 @@ export function WithdrawStatus() {
     return (
       <AppLayout tab="/earnings" title="Withdrawal" back bottomNav={false} maxW="md" bg="white">
         <PlainHeader title="Withdrawal" />
-        <p className="px-5 pt-10 text-center text-[14px] text-ink-400">Loading…</p>
+        <SkelGroup className="py-6"><SkelResult /></SkelGroup>
       </AppLayout>
     )
   }
@@ -207,7 +218,7 @@ export function WithdrawStatus() {
           )}
           {!isDemo && wd && (
             <div className="card p-4 text-left">
-              <KV k="Reference" v={wd.id.slice(0, 8).toUpperCase()} strong />
+              <KV k="Reference" v={referenceCode(wd, state).slice(0, 8).toUpperCase() || '—'} strong />
               <KV k="Amount" v={<span className="text-gold-500">{rupees(wd.convertedAmountPaise)}</span>} strong />
               <KV k="Net payout" v={rupees(wd.netPayoutPaise)} strong />
             </div>

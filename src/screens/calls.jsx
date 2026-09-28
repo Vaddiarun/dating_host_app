@@ -7,7 +7,7 @@ import { EmojiPicker, insertAtCaret } from '../ui/EmojiPicker.jsx'
 import { FloatingComments, recentComments } from '../ui/FloatingComments.jsx'
 import { GiftRequestSheet } from './misc.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
-import { calls as callsApi, earnings as earningsApi, chat as chatApi, profile as profileApi } from '../api/index.js'
+import { calls as callsApi, chat as chatApi, profile as profileApi } from '../api/index.js'
 import { rupees, clockTime, dayLabel } from '../lib/format.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
 import { getBeautySettings, setBeautySettings } from '../lib/beautyFilter.js'
@@ -15,6 +15,7 @@ import { useAuth } from '../state/AuthContext.jsx'
 import { errorMessage } from '../lib/errors.js'
 import { playRingtone } from '../lib/sound.js'
 import { onSocketEvent } from '../lib/socket.js'
+import { Skel, SkelGroup, SkelList, SkelResult } from '../ui/Skeleton.jsx'
 
 /** 'voice' | 'video' | null (unknown) for a call-ish object or raw type string. The user app
  * creates calls with `type: 'voice' | 'video'` (POST /calls); history rows expose it as
@@ -27,69 +28,166 @@ function callKind(src) {
 }
 
 /* 15 — Calls list */
+const CALL_FILTERS = { All: 'all', Video: 'video', Voice: 'voice', Missed: 'missed' }
+// Backend call statuses: ringing | ongoing | completed | missed | rejected. `failed` exists in
+// the database but is never set — treated as missed just in case.
+const LIVE_STATUSES = ['ringing', 'ongoing']
+const MISSED_STATUSES = ['missed', 'failed']
+// Call-length rating from the backend (durationQuality): under 4 min = bad, 4–10 min = good,
+// over 10 min = excellent; null for missed / rejected / live calls (no badge then).
+const QUALITY = {
+  bad: { label: 'Bad', cls: 'bg-rose-50 text-rose-500' },
+  good: { label: 'Good', cls: 'bg-emerald-50 text-emerald-600' },
+  excellent: { label: 'Excellent', cls: 'bg-gold-50 text-gold-600', star: true },
+}
+
+function QualityPill({ q, size = 'sm' }) {
+  const meta = QUALITY[q]
+  if (!meta) return null
+  const big = size === 'lg'
+  return (
+    <span title="Call length rating" className={`inline-flex items-center gap-1 rounded-full font-semibold shrink-0 ${meta.cls} ${big ? 'px-2.5 py-1 text-[12px]' : 'px-1.5 py-px text-[10.5px]'}`}>
+      {meta.star && <Icon name="star" size={big ? 12 : 10} fill="currentColor" />}{meta.label}
+    </span>
+  )
+}
+
+// Extra context for a completed call, from endReason (normal hang-ups get no note).
+const END_NOTES = { insufficient_balance: 'wallet ran out', reaped_stale_ongoing: 'connection lost' }
+
+/** "12 min 5 sec" / "45 sec" — call length for the list row. */
+function callLength(sec) {
+  if (!sec) return ''
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return m ? `${m} min${s ? ` ${s} sec` : ''}` : `${s} sec`
+}
+
 export function CallsList() {
   const nav = useNavigate()
   const [f, setF] = useState('All')
   const [items, setItems] = useState([])
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
+  const [summary, setSummary] = useState(null) // { totalCalls, earnedPaise } — whole filter, not just loaded pages
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [err, setErr] = useState('')
+  const [moreErr, setMoreErr] = useState('')
+  const reqRef = useRef(0)
+  const sentinelRef = useRef(null)
 
-  const load = () => {
-    setLoading(true)
-    setErr('')
-    earningsApi.history('calls', 1, 50)
-      .then((res) => setItems(res.items || []))
-      .catch((e) => setErr(errorMessage(e, 'Could not load your calls.')))
-      .finally(() => setLoading(false))
+  // Page 1 replaces the list (new tab / retry); later pages append. The filter is applied by
+  // the server, so "Missed" covers every call, not just the ones already loaded.
+  const load = (pageNo = 1) => {
+    const req = ++reqRef.current
+    if (pageNo === 1) { setLoading(true); setErr('') } else { setLoadingMore(true); setMoreErr('') }
+    callsApi.list(CALL_FILTERS[f], pageNo, 20)
+      .then((res) => {
+        if (req !== reqRef.current) return // a newer tab/page request superseded this one
+        const list = res.calls || []
+        setItems((prev) => (pageNo === 1 ? list : [...prev, ...list]))
+        setPage(pageNo)
+        setHasMore(!!res.hasMore)
+        // summary covers every call matching the filter; fall back to `total` if it's absent
+        if (res.summary) setSummary(res.summary)
+        else if (pageNo === 1) setSummary({ totalCalls: res.total ?? null, earnedPaise: null })
+      })
+      .catch((e) => {
+        if (req !== reqRef.current) return
+        if (pageNo === 1) setErr(errorMessage(e, 'Could not load your calls.'))
+        else setMoreErr(errorMessage(e, 'Could not load more calls.'))
+      })
+      .finally(() => {
+        if (req !== reqRef.current) return
+        setLoading(false)
+        setLoadingMore(false)
+      })
   }
-  useEffect(load, [])
+  useEffect(() => { load(1) }, [f]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = items.filter((c) => {
-    if (f === 'All') return true
-    if (f === 'Video') return c.callType === 'video'
-    if (f === 'Voice') return c.callType === 'voice'
-    if (f === 'Missed') return c.status === 'missed' || c.status === 'no_answer'
-    return true
-  })
+  // Load the next page automatically when the end of the list scrolls into view.
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore || loading || loadingMore || moreErr) return
+    const io = new IntersectionObserver((entries) => { if (entries[0].isIntersecting) load(page + 1) }, { rootMargin: '300px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, loading, loadingMore, moreErr, page]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const groups = filtered.reduce((acc, c) => {
-    const day = dayLabel(c.when)
+  const groups = items.reduce((acc, c) => {
+    const day = dayLabel(c.startedAt || c.createdAt)
     ;(acc[day] ||= []).push(c)
     return acc
   }, {})
 
-  const totalEarned = items.reduce((sum, c) => sum + (c.amountPaise || 0), 0)
+  const totalCalls = summary?.totalCalls ?? items.length
+  // Earned = host's share after commission (same as the dashboard), not what the user paid.
+  const totalEarned = summary?.earnedPaise ?? items.reduce((sum, c) => sum + (c.earnedPaise || 0), 0)
 
   return (
-    <AppLayout tab="/calls" title="Calls" maxW="lg" bg="canvas">
+    <AppLayout tab="/calls" title="Calls" maxW="xl" bg="canvas">
       <PlainHeader title="Calls" sub="Recent calls" right={<button className="h-10 w-10 grid place-items-center rounded-xl border border-black/10 text-ink-700"><Icon name="search" size={18} /></button>} />
-      <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4">
-        <Segmented options={['All', 'Video', 'Voice', 'Missed']} value={f} onChange={setF} />
-        <div className="grid grid-cols-3 gap-3 mt-4">
-          {[['phone', String(items.length), 'Calls'], ['wallet', rupees(totalEarned), 'Earned']].map(([i, v, l]) => (
-            <div key={l} className="card p-3.5"><Icon name={i} size={16} className="text-brand-600" /><p className="text-[18px] font-extrabold text-ink-900 mt-0.5">{v}</p><p className="text-[12px] text-ink-400">{l}</p></div>
+      {/* Laptop: filters + list on the left, the summary cards in a sticky right rail. */}
+      <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4 lg:grid lg:grid-cols-[1fr_300px] lg:gap-x-6 lg:items-start">
+        <div className="lg:col-start-1"><Segmented options={['All', 'Video', 'Voice', 'Missed']} value={f} onChange={setF} /></div>
+        <div className="grid grid-cols-3 gap-3 mt-4 lg:mt-0 lg:grid-cols-1 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-6">
+          {[['phone', String(totalCalls), f === 'All' ? 'Calls' : `${f} calls`], ['wallet', rupees(totalEarned), 'Earned']].map(([i, v, l]) => (
+            <div key={i} className="card p-3.5"><Icon name={i} size={16} className="text-brand-600" />{loading ? <Skel className="h-5 w-14 rounded-md my-1" /> : <p className="text-[18px] font-extrabold text-ink-900 mt-0.5">{v}</p>}<p className="text-[12px] text-ink-400">{l}</p></div>
           ))}
         </div>
-        {loading && <p className="text-[13px] text-ink-400 mt-6 text-center">Loading…</p>}
-        {!loading && err && <ErrorCard message={err} onRetry={load} className="mt-6" />}
-        {!loading && !err && filtered.length === 0 && <p className="text-[13px] text-ink-400 mt-6 text-center">No calls yet.</p>}
-        {!err && Object.entries(groups).map(([day, list]) => (
+        <div className="lg:col-start-1">
+        {loading && <SkelGroup><SkelList rows={6} title /></SkelGroup>}
+        {!loading && err && <ErrorCard message={err} onRetry={() => load(1)} className="mt-6" />}
+        {!loading && !err && items.length === 0 && <p className="text-[13px] text-ink-400 mt-6 text-center">{f === 'Missed' ? 'No missed calls.' : 'No calls yet.'}</p>}
+        {!loading && !err && Object.entries(groups).map(([day, list]) => (
           <div key={day}>
             <SectionTitle className="mt-5 mb-1">{day}</SectionTitle>
             <div className="card px-4 lg:px-4 divide-y divide-black/5">
-              {list.map((c) => (
-                <button key={c.id} onClick={() => nav(`/call/summary?callId=${c.id}`)} className="w-full flex items-center gap-3 py-3 text-left">
-                  <Avatar name="Caller" size={40} />
-                  <div className="flex-1"><p className="text-[15px] font-semibold text-ink-900">{c.callType === 'voice' ? 'Voice call' : 'Video call'}</p><p className="text-[12px] text-ink-400 capitalize">{c.status}</p></div>
-                  <div className="text-right">
-                    {c.status === 'missed' || c.status === 'no_answer' ? <span className="pill bg-rose-50 text-rose-500 text-[11px]">Missed</span> : <p className="text-[14px] font-bold text-emerald-600">+ {rupees(c.amountPaise)}</p>}
-                    <p className="text-[11px] text-ink-300 mt-0.5">{clockTime(c.when)}</p>
-                  </div>
-                </button>
-              ))}
+              {list.map((c) => {
+                const live = LIVE_STATUSES.includes(c.status)
+                const missed = MISSED_STATUSES.includes(c.status)
+                const cancelled = missed && c.endReason === 'cancelled_by_caller' // user hung up before the host answered
+                const declined = c.status === 'rejected'
+                const kind = c.type === 'voice' ? 'Voice call' : 'Video call'
+                const note = c.status === 'completed' && END_NOTES[c.endReason]
+                return (
+                  // A live call has no summary yet — not tappable until it ends.
+                  <button key={c.id} disabled={live} onClick={() => nav(`/call/summary?callId=${c.id}`)} className="w-full flex items-center gap-3 py-3 text-left disabled:cursor-default">
+                    <Avatar name={c.callerName || 'Caller'} size={40} />
+                    <div className="flex-1 min-w-0">
+                      <p className="flex items-center gap-1.5 min-w-0"><span className="text-[15px] font-semibold text-ink-900 truncate">{c.callerName || 'Caller'}</span><QualityPill q={c.durationQuality} /></p>
+                      <p className="text-[12px] text-ink-400 flex items-center gap-1 min-w-0">
+                        <Icon name={c.type === 'voice' ? 'phone' : 'video'} size={11} className="shrink-0" /> <span className="truncate">{kind}{c.status === 'completed' && c.durationSeconds ? ` · ${callLength(c.durationSeconds)}` : ''}</span>
+                      </p>
+                      {note && <p className="text-[11px] font-medium text-gold-600 mt-0.5 first-letter:uppercase">{note}</p>}
+                    </div>
+                    <div className="text-right shrink-0">
+                      {live ? <span className="pill bg-emerald-50 text-emerald-600 text-[11px]"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live now</span>
+                        : cancelled ? <span className="pill bg-black/5 text-ink-500 text-[11px]">Cancelled</span>
+                        : missed ? <span className="pill bg-rose-50 text-rose-500 text-[11px]">Missed</span>
+                        : declined ? <span className="pill bg-black/5 text-ink-500 text-[11px]">Declined</span>
+                        : <p className="text-[14px] font-bold text-emerald-600">+ {rupees(c.earnedPaise)}</p>}
+                      <p className="text-[11px] text-ink-300 mt-0.5">{clockTime(c.startedAt || c.createdAt)}</p>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </div>
         ))}
+        {/* pagination: auto-loads near the end; the button is the fallback */}
+        {!loading && !err && hasMore && (
+          <div ref={sentinelRef} className="mt-4">
+            {loadingMore ? <SkelGroup><SkelList rows={2} /></SkelGroup> : (
+              <>
+                {moreErr && <ErrorCard message={moreErr} compact className="mb-3" />}
+                <button onClick={() => load(page + 1)} className="btn-outline text-[13px]">{moreErr ? 'Try again' : 'Load more'}</button>
+              </>
+            )}
+          </div>
+        )}
+        </div>
       </div>
     </AppLayout>
   )
@@ -277,6 +375,7 @@ function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose 
         <input
           ref={inputRef}
           value={text}
+          maxLength={2000}
           onChange={(e) => setText(e.target.value)}
           onFocus={() => setEmojiOpen(false)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
@@ -727,18 +826,33 @@ export function CallSummary() {
   const secs = durationSec % 60
   const callerName = call?.callerName || 'Caller'
 
+  // Still fetching the call — skeleton instead of a placeholder "Caller · ₹0".
+  if (callId && !call && !err) {
+    return (
+      <AppLayout tab="/calls" title="Call ended" maxW="lg" bg="white">
+        <PlainHeader title="Call ended" />
+        <SkelGroup className="pt-8 lg:pt-2 pb-4"><SkelResult /></SkelGroup>
+      </AppLayout>
+    )
+  }
+
   return (
-    <AppLayout tab="/calls" title="Call ended" maxW="md" bg="white">
+    <AppLayout tab="/calls" title="Call ended" maxW="lg" bg="white">
       <PlainHeader title="Call ended" />
-      <div className="px-5 lg:px-0 pt-8 lg:pt-2 pb-4 flex flex-col items-center">
+      {/* Laptop: caller + earnings on the left, rating + actions on the right. */}
+      <div className="px-5 lg:px-0 pt-8 lg:pt-2 pb-4 flex flex-col items-center lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
+        <div className="w-full flex flex-col items-center lg:card lg:p-6">
         <Avatar name={callerName} size={92} className="ring-4 ring-brand-500/30" />
         <h2 className="mt-3 text-[22px] font-extrabold text-ink-900">{callerName}</h2>
         <p className="text-[13px] text-ink-400">{callKind(call) === 'voice' ? 'Voice call' : 'Video call'}{durationSec ? ` · ${mins} min ${secs} sec` : ''}</p>
+        {QUALITY[call?.durationQuality] && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-400">Call length <QualityPill q={call.durationQuality} size="lg" /></div>}
         <ErrorCard message={err} onRetry={load} compact className="w-full mt-3" />
-        <div className="card w-full mt-5 p-4">
+        <div className="card w-full mt-5 p-4 lg:bg-gold-50/60 lg:shadow-none">
           <div className="flex items-center justify-between"><span className="text-[14px] text-ink-500">You earned</span><span className="text-[22px] font-extrabold text-gold-500">{rupees(call?.totalAmountPaise)}</span></div>
         </div>
-        <div className="card w-full mt-3 p-4 text-center">
+        </div>
+        <div className="w-full">
+        <div className="card w-full mt-3 lg:mt-0 p-4 text-center">
           <p className="text-[14px] font-semibold text-ink-900">Rate this call</p>
           <div className="mt-2 flex justify-center gap-1.5">
             {[1, 2, 3, 4, 5].map((n) => (
@@ -750,6 +864,7 @@ export function CallSummary() {
         <div className="w-full mt-4 space-y-3">
           <button onClick={() => nav('/home')} className="btn-primary">Back to home</button>
           <button onClick={() => nav('/report', { state: { targetId: call?.userId, targetName: callerName } })} className="btn-danger-outline"><Icon name="flag" size={16} /> Report this user</button>
+        </div>
         </div>
       </div>
     </AppLayout>

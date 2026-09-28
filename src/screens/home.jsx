@@ -8,6 +8,8 @@ import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 import { earnings as earningsApi, presence as presenceApi } from '../api/index.js'
 import { rupees, clockTime } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
+import { TodayReportCard } from './dailyReport.jsx'
+import { Skel, SkelGroup, SkelHero, SkelStats, SkelList } from '../ui/Skeleton.jsx'
 
 function MobileHead({ label, tone, name, avatarUrl }) {
   const nav = useNavigate()
@@ -15,7 +17,9 @@ function MobileHead({ label, tone, name, avatarUrl }) {
   const t = { offline: 'bg-black/5 text-ink-500', online: 'bg-emerald-50 text-emerald-600', call: 'bg-gold-50 text-gold-600', live: 'bg-rose-50 text-rose-500' }[tone]
   return (
     <div className="lg:hidden px-5 pt-2 pb-3 flex items-center gap-2 bg-white">
-      <Avatar name={name} size={42} src={avatarUrl} ring="#6d3be6" />
+      <button onClick={() => nav('/settings')} className="shrink-0 rounded-full active:scale-95 transition" aria-label="Profile & settings">
+        <Avatar name={name} size={42} src={avatarUrl} ring="#6d3be6" />
+      </button>
       <div className="flex-1 min-w-0">
         <p className="text-[16px] font-bold text-ink-900 leading-tight truncate">Hi, {name}</p>
         <span className={`pill ${t} mt-0.5`}><span className="h-1.5 w-1.5 rounded-full bg-current" /> {label}</span>
@@ -30,13 +34,14 @@ function MobileHead({ label, tone, name, avatarUrl }) {
   )
 }
 
-function Stat({ icon, tone, value, label }) {
+function Stat({ icon, tone, value, label, onClick }) {
+  const Tag = onClick ? 'button' : 'div'
   return (
-    <div className="card p-3.5">
+    <Tag onClick={onClick} className={`card p-3.5 text-left ${onClick ? 'active:scale-[.98] transition' : ''}`}>
       <Icon name={icon} size={17} className={tone} />
-      <p className="text-[18px] font-extrabold text-ink-900 leading-none mt-1.5">{value}</p>
+      <p className="text-[18px] font-extrabold text-ink-900 leading-none mt-1.5 whitespace-nowrap tracking-tight">{value}</p>
       <p className="text-[12px] text-ink-400 mt-1">{label}</p>
-    </div>
+    </Tag>
   )
 }
 
@@ -69,6 +74,15 @@ function RecentCard({ items }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function PeakTip() {
+  return (
+    <div className="card p-3.5 flex items-center gap-3">
+      <span className="grid place-items-center h-10 w-10 rounded-full border-2 border-dashed border-brand-300 text-brand-500 shrink-0"><Icon name="trending-up" size={16} /></span>
+      <div><p className="text-[14px] font-semibold text-ink-900">Peak hours start at 8 PM</p><p className="text-[12px] text-ink-400">Hosts online at peak earn 2.4× more on average.</p></div>
     </div>
   )
 }
@@ -175,7 +189,9 @@ export default function Home() {
 
       {/* desktop greeting */}
       <div className="hidden lg:flex items-center gap-3 mb-6">
-        <Avatar name={name} size={48} src={me?.avatarUrl} ring="#6d3be6" />
+        <button onClick={() => nav('/settings')} className="rounded-full hover:opacity-90 transition" aria-label="Profile & settings">
+          <Avatar name={name} size={48} src={me?.avatarUrl} ring="#6d3be6" />
+        </button>
         <div>
           <p className="text-[20px] font-extrabold text-ink-900">Hi, {name}</p>
           <p className="text-[13px] text-ink-400">{state === 'offline' ? "You're offline — viewers can't reach you" : `You're ${label.toLowerCase()}`}</p>
@@ -183,12 +199,17 @@ export default function Home() {
       </div>
 
       {loading ? (
-        <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4 space-y-4 animate-pulse">
-          <div className="h-24 rounded-2xl bg-black/[.06]" />
-          <div className="grid grid-cols-3 gap-3">{[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-2xl bg-black/[.06]" />)}</div>
-        </div>
+        <SkelGroup className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4 grid gap-4 lg:grid-cols-[1fr_340px] lg:gap-5 lg:items-start">
+          <div className="space-y-4">
+            <div className="card p-4 flex items-center gap-3"><Skel className="h-11 w-11 rounded-xl" /><div className="flex-1 space-y-2"><Skel className="h-3.5 w-1/3 rounded-md" /><Skel className="h-2.5 w-1/2 rounded-md" /></div><Skel className="h-7 w-12 rounded-full" /></div>
+            <SkelHero />
+            <SkelStats count={3} />
+            <SkelList rows={3} title />
+          </div>
+          <div className="hidden lg:block space-y-4"><SkelHero height="h-48" className="rounded-3xl" /><Skel className="h-20 rounded-2xl" /></div>
+        </SkelGroup>
       ) : (
-        <div className={`px-5 lg:px-0 pt-3 lg:pt-0 grid gap-4 lg:grid-cols-[1fr_320px] lg:items-start ${state === 'offline' || state === 'online' ? 'pb-24 lg:pb-4' : 'pb-4'}`}>
+        <div className={`px-5 lg:px-0 pt-3 lg:pt-0 grid gap-4 lg:grid-cols-[1fr_340px] lg:gap-5 lg:items-start ${state === 'offline' || state === 'online' ? 'pb-24 lg:pb-4' : 'pb-4'}`}>
           {/* main column */}
           <div className="space-y-4">
             <ErrorCard message={err} onRetry={load} compact />
@@ -196,7 +217,8 @@ export default function Home() {
             {showBalance && <div className="lg:hidden"><Balance paise={balance?.availableBalancePaise} beans={balance?.beanBalance} /></div>}
             <div className="hidden lg:block"><Balance paise={balance?.availableBalancePaise} beans={balance?.beanBalance} /></div>
             <div className={`grid grid-cols-3 gap-3 ${state === 'live' ? 'lg:hidden' : ''}`}>
-              {stats.map(([i, t, v, l]) => <Stat key={l} icon={i} tone={t} value={v} label={l} />)}
+              {/* Today's earnings / calls open the full Daily report (online time + split by source). */}
+              {stats.map(([i, t, v, l]) => <Stat key={l} icon={i} tone={t} value={v} label={l} onClick={(state === 'offline' || state === 'online') && (i === 'wallet' || i === 'phone') ? () => nav('/earnings/daily') : undefined} />)}
             </div>
             {state === 'call' && (
               <div className="flex items-center gap-2 rounded-xl bg-gold-50 px-3 py-2.5 text-[12px] text-gold-600"><Icon name="alert" size={14} /> New call requests are paused while you're busy.</div>
@@ -218,15 +240,15 @@ export default function Home() {
                 </div>
               </>
             )}
-            <div className="card p-3.5 flex items-center gap-3">
-              <span className="grid place-items-center h-10 w-10 rounded-full border-2 border-dashed border-brand-300 text-brand-500 shrink-0"><Icon name="trending-up" size={16} /></span>
-              <div><p className="text-[14px] font-semibold text-ink-900">Peak hours start at 8 PM</p><p className="text-[12px] text-ink-400">Hosts online at peak earn 2.4× more on average.</p></div>
-            </div>
+            {/* phone: peak-hours tip sits in the main flow; laptop shows it in the right rail */}
+            <div className="lg:hidden"><PeakTip /></div>
             {(state === 'offline' || state === 'online') && <RecentCard items={dash?.recentCalls} />}
           </div>
 
-          {/* right rail */}
-          <div className="space-y-4">
+          {/* right rail (laptop) — today's report + tips, so the wide screen isn't half empty */}
+          <div className="space-y-4 lg:sticky lg:top-6">
+            {(state === 'offline' || state === 'online') && <div className="hidden lg:block"><TodayReportCard /></div>}
+            <div className="hidden lg:block"><PeakTip /></div>
             {state === 'offline' && (
               <div className="hidden lg:block card p-4">
                 <SectionTitle className="mb-2">Today's tip</SectionTitle>

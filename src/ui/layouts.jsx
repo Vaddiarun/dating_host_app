@@ -1,4 +1,5 @@
 import { StatusBar, BottomNav, SideNav, DesktopTopBar } from './kit.jsx'
+import logoUrl from '../assets/logo.png'
 
 const MAXW = {
   sm: 'lg:max-w-md',
@@ -23,7 +24,11 @@ export function AppLayout({ children, title, back, bottomNav = true, bg = 'canva
       <div className="flex h-full lg:h-auto w-full flex-col lg:flex-1 lg:min-w-0">
         <StatusBar />
         <DesktopTopBar title={title} back={back} />
-        <main className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar ${bgClass} lg:bg-canvas`}>
+        {/* On laptop (lg) only the page scrolls, never this area as well — that double scroll
+            was the "extra scrolling". `relative` keeps absolutely-positioned descendants
+            (tooltips, screen-reader-only tables) inside this area; without it they're placed
+            against the page and can stretch it past the app, showing the page background. */}
+        <main className={`relative flex-1 min-h-0 overflow-y-auto overflow-x-hidden lg:overflow-visible no-scrollbar ${bgClass} lg:bg-canvas`}>
           <div className={`w-full min-w-0 h-full flex flex-col lg:h-auto lg:block lg:mx-auto ${MAXW[maxW]} ${pad ? 'lg:px-8 lg:py-8' : ''}`}>{children}</div>
         </main>
         {bottomNav && <BottomNav />}
@@ -41,7 +46,7 @@ export function CenterLayout({ children }) {
     <div className="min-h-[100dvh] w-full bg-white lg:flex">
       <div className="hidden lg:flex w-[42%] max-w-[520px] flex-col justify-between bg-gradient-to-br from-brand-700 via-brand-800 to-night-900 p-12 text-white">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-brand-300 to-brand-500" />
+          <img src={logoUrl} alt="" className="h-10 w-10" />
           <span className="text-[20px] font-extrabold">Splash</span>
         </div>
         <div>
