@@ -4,6 +4,7 @@ import { HashRouter } from 'react-router-dom'
 import App from './App.jsx'
 import { AuthProvider } from './state/AuthContext.jsx'
 import { NotificationsProvider } from './state/NotificationsContext.jsx'
+import { ChatUnreadProvider } from './state/ChatUnreadContext.jsx'
 import './index.css'
 
 // After a new deploy, a tab left open from before it still holds an old
@@ -26,7 +27,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <HashRouter>
       <AuthProvider>
         <NotificationsProvider>
-          <App />
+          <ChatUnreadProvider>
+            <App />
+          </ChatUnreadProvider>
         </NotificationsProvider>
       </AuthProvider>
     </HashRouter>
