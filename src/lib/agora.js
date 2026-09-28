@@ -46,6 +46,13 @@ export function appIdFromToken(token) {
  * edited mid-session — a plain camera track has no pipeline to push updated settings into, so
  * turning beauty on during the call would otherwise do nothing.
  */
+/** Agora encoder: 1280x720 on laptops, 720x1280 on phones held upright — same pixel count (same
+ * HD billing tier), but a portrait phone isn't forced to crop its picture into a landscape strip. */
+function callVideoEncoder() {
+  const upright = typeof window !== 'undefined' && !!window.matchMedia?.('(orientation: portrait) and (pointer: coarse)').matches
+  return upright ? { width: 720, height: 1280, frameRate: 15 } : '720p_1'
+}
+
 export async function joinAndPublish({ channelName, token, uid, video = true, mode = 'rtc', role, beautySettings, alwaysBeautyPipeline = false, onRemoteUser } = {}) {
   const RTC = await sdk()
   RTC.setLogLevel(4) // errors only — the SDK is chatty at its default level
@@ -78,7 +85,7 @@ export async function joinAndPublish({ channelName, token, uid, video = true, mo
       // Same 1280x720 the beauty pipeline above captures at (beautyFilter.js) — the highest
       // resolution in Agora's HD billing tier; the SDK's 480p default costs the same.
       // Going above 720p moves every receiver to the ~2.25x Full HD rate.
-      localVideoTrack = await RTC.createCameraVideoTrack({ encoderConfig: '720p_1' })
+      localVideoTrack = await RTC.createCameraVideoTrack({ encoderConfig: callVideoEncoder() })
     }
   }
   await client.publish([localAudioTrack, localVideoTrack].filter(Boolean))

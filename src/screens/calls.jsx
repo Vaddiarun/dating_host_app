@@ -332,7 +332,26 @@ export function Connecting() {
 /* In-call chat drawer — a compact version of the Thread component in chat.jsx (same
  * send/receive API), not the full conversation-history view: this is the live session log
  * the "in-call chat toggle" screen calls for, not a place to browse past messages. */
+/** Height of the on-screen keyboard (0 when closed). Most mobile browsers overlay the keyboard
+ * on the page without shrinking the layout, so a bottom-anchored chat box ends up behind it —
+ * this reads the visual viewport so the box can sit just above the keyboard instead. `vh` is the
+ * height actually visible above it. */
+function useKeyboardInset() {
+  const [kb, setKb] = useState({ inset: 0, vh: typeof window !== 'undefined' ? window.innerHeight : 0 })
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setKb({ inset: Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)), vh: Math.round(vv.height) })
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    update()
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+  }, [])
+  return kb
+}
+
 function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose }) {
+  const kb = useKeyboardInset()
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState('')
@@ -365,7 +384,11 @@ function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose 
   // No panel — the conversation floats over the video like Instagram live comments, with just a
   // soft bottom gradient so white text stays readable on a bright background.
   return (
-    <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col pt-16 bg-gradient-to-t from-black/75 via-black/35 to-transparent animate-fade-in ${emojiOpen ? 'max-h-[70%]' : 'max-h-[50%]'}`}>
+    // Sits just above the keyboard while typing, and never taller than what's visible above it.
+    <div
+      className="absolute inset-x-0 z-30 flex flex-col pt-16 bg-gradient-to-t from-black/80 via-black/40 to-transparent animate-fade-in transition-[bottom] duration-150"
+      style={{ bottom: kb.inset, maxHeight: Math.round((kb.inset ? kb.vh : kb.vh || window.innerHeight) * (emojiOpen ? 0.7 : kb.inset ? 0.6 : 0.5)) }}
+    >
       {messages.length === 0
         ? <p className="px-4 pb-2 text-[12px] text-white/70" style={{ textShadow: '0 1px 3px rgba(0,0,0,.75)' }}>No messages yet — say hello!</p>
         : <FloatingComments comments={comments} fadeOut={false} scrollable endRef={bottomRef} className="flex-1 px-4" />}
@@ -720,7 +743,8 @@ export function ActiveCall() {
     <ImmersiveLayout>
       {/* Edge to edge: the video fills the whole screen; the header and controls float on top
           of it over soft dark fades (not solid strips that ate a quarter of the picture). */}
-      <div ref={stageRef} className={`relative h-[100dvh] w-full overflow-hidden text-white ${isVoice ? 'bg-gradient-to-b from-night-700 to-night-900' : 'bg-black'}`}>
+      {/* fixed, not in page flow — focusing the chat box used to scroll the whole call view */}
+      <div ref={stageRef} className={`fixed inset-0 overflow-hidden text-white ${isVoice ? 'bg-gradient-to-b from-night-700 to-night-900' : 'bg-black'}`}>
         <div className="absolute inset-x-0 top-0 z-30 bg-gradient-to-b from-black/70 via-black/35 to-transparent pb-10 pointer-events-none">
           <StatusBar dark />
           <div className="w-full max-w-[520px] mx-auto px-4 pt-1 flex items-center gap-3 pointer-events-auto">
@@ -865,7 +889,7 @@ export function ActiveCall() {
         {!chatOpen && !beautyOpen && (
           <FloatingComments
             comments={recentComments(chatMessages.filter((m) => m.senderId === counterpartId).map((m) => ({ id: m.id, name: callerName, text: m.content, at: m.at })), 4)}
-            className="absolute left-4 right-4 bottom-36 z-20 max-h-[35%] pointer-events-none"
+            className="absolute left-4 right-4 bottom-44 z-40 max-h-[35%] pointer-events-none"
           />
         )}
         {beautyOpen && <CallBeautySheet settings={beauty} onChange={updateBeauty} onClose={closeBeauty} />}

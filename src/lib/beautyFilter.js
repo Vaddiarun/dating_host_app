@@ -77,8 +77,15 @@ const DETECT_BACKOFF_MAX_MS = 8000
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
+// A phone held upright gives the camera a portrait picture. Asking it for landscape 1280x720
+// made the browser cut a wide strip out of the middle and scale it up, so the other person saw
+// a zoomed-in, cropped face. Portrait on upright touch devices; laptops keep 1280x720.
+const isUprightTouchDevice = () =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(orientation: portrait) and (pointer: coarse)').matches
+
 function cameraConstraints(facingMode) {
-  return { facingMode, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
+  const [width, height] = isUprightTouchDevice() ? [720, 1280] : [1280, 720]
+  return { facingMode, width: { ideal: width }, height: { ideal: height }, frameRate: { ideal: 30, max: 30 } }
 }
 
 // ---------------------------------------------------------------------------------------------
