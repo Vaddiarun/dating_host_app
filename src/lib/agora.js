@@ -75,7 +75,10 @@ export async function joinAndPublish({ channelName, token, uid, video = true, mo
       beautyCamera = await openBeautyCamera({ settings: beautySettings, audio: false })
       localVideoTrack = RTC.createCustomVideoTrack({ mediaStreamTrack: beautyCamera.videoTrack })
     } else {
-      localVideoTrack = await RTC.createCameraVideoTrack()
+      // Same 1280x720 the beauty pipeline above captures at (beautyFilter.js) — the highest
+      // resolution in Agora's HD billing tier; the SDK's 480p default costs the same.
+      // Going above 720p moves every receiver to the ~2.25x Full HD rate.
+      localVideoTrack = await RTC.createCameraVideoTrack({ encoderConfig: '720p_1' })
     }
   }
   await client.publish([localAudioTrack, localVideoTrack].filter(Boolean))
