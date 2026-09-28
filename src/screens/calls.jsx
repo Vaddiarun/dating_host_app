@@ -434,6 +434,19 @@ function CallBeautySheet({ settings, onChange, onClose }) {
   )
 }
 
+/** Labelled round call button — label under the icon so every control is self-explanatory;
+ * `active` = white (e.g. muted, camera off, panel open), `danger` = the red end-call button. */
+function CallControl({ icon, label, onClick, active = false, danger = false, disabled = false }) {
+  return (
+    <button onClick={onClick} disabled={disabled} className="flex w-[60px] flex-col items-center gap-1.5 disabled:opacity-60" aria-pressed={danger ? undefined : active}>
+      <span className={`grid place-items-center rounded-full transition active:scale-95 ${danger ? 'h-14 w-14 bg-rose-500 shadow-lg shadow-rose-500/40' : `h-12 w-12 backdrop-blur-md ${active ? 'bg-white text-ink-900' : 'bg-white/15 text-white'}`}`}>
+        <Icon name={icon} size={danger ? 22 : 20} />
+      </span>
+      <span className="text-[11px] font-medium text-white/85 leading-tight text-center whitespace-nowrap">{label}</span>
+    </button>
+  )
+}
+
 /* 18 — On call */
 export function ActiveCall() {
   const nav = useNavigate()
@@ -452,7 +465,12 @@ export function ActiveCall() {
   const [ending, setEnding] = useState(false)
   const [rtcErr, setRtcErr] = useState('')
   const [callErr, setCallErr] = useState('')
-  const [remoteJoined, setRemoteJoined] = useState(false)
+  const [remoteJoined, setRemoteJoined] = useState(false) // remote video is on right now
+  const [remoteSeen, setRemoteSeen] = useState(false) // the other person has connected at least once
+  const [remoteMuted, setRemoteMuted] = useState(false)
+  const [remoteStream, setRemoteStream] = useState(null) // same remote video, for the blurred backdrop
+  const [giftBeans, setGiftBeans] = useState(0) // gifts received during this call
+  const [confirmEnd, setConfirmEnd] = useState(false)
   const [flipping, setFlipping] = useState(false)
   const [giftOpen, setGiftOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
@@ -466,6 +484,7 @@ export function ActiveCall() {
   const stageRef = useRef(null)
   const dragRef = useRef({ dragging: false, moved: false, startX: 0, startY: 0, origX: 0, origY: 0 })
   const remoteVideoRef = useRef(null)
+  const remoteBgRef = useRef(null)
   const localVideoRef = useRef(null)
   const sessionRef = useRef(null)
   const joinRef = useRef(null) // { key, promise } — see the join effect below
@@ -517,18 +536,26 @@ export function ActiveCall() {
             // anything but 'video', so the caller's subscribed audio track was
             // never actually started. Subscribing alone doesn't play it; the
             // SDK requires an explicit .play() call, same as video.
+            // Unpublishing is how the other side turning their camera off / muting reaches us —
+            // show their avatar + a muted badge rather than a frozen last frame.
             if (left) {
-              if (mediaType === 'video') setRemoteJoined(false)
+              if (mediaType === 'video') { setRemoteJoined(false); setRemoteStream(null) }
+              if (mediaType === 'audio') setRemoteMuted(true)
               return
             }
             if (mediaType === 'video') {
-              // Explicit `fit: 'cover'` — left unset, the SDK letterboxes the remote feed
-              // (black bars either side) whenever its captured aspect ratio doesn't match
-              // this container's; cover crops to fill instead, like every other call UI.
-              user.videoTrack?.play(remoteVideoRef.current, { fit: 'cover' })
+              // `contain`, not `cover`: a wide 16:9 picture in a tall box lost about half its
+              // width to cropping (faces looked zoomed in). The full picture is shown, and a
+              // blurred copy of the same video fills the space around it.
+              user.videoTrack?.play(remoteVideoRef.current, { fit: 'contain' })
+              const mst = user.videoTrack?.getMediaStreamTrack?.()
+              setRemoteStream(mst ? new MediaStream([mst]) : null)
               setRemoteJoined(true)
+              setRemoteSeen(true)
             } else if (mediaType === 'audio') {
               user.audioTrack?.play()
+              setRemoteMuted(false)
+              setRemoteSeen(true)
             }
           },
         }),
@@ -539,7 +566,9 @@ export function ActiveCall() {
       .then((session) => {
         if (cancelled) return // a still-mounted invocation (if any) owns this session now
         sessionRef.current = session
-        session.localVideoTrack?.play(localVideoRef.current, { fit: 'cover' })
+        // Mirror the self-view (front camera) like every call app — only the local preview;
+        // the other person still receives the normal, unmirrored video.
+        session.localVideoTrack?.play(localVideoRef.current, { fit: 'cover', mirror: true })
       })
       .catch((e) => {
         if (cancelled) return
@@ -558,6 +587,15 @@ export function ActiveCall() {
       }, 400)
     }
   }, [channelName, agoraToken, kind])
+
+  useEffect(() => {
+    const el = remoteBgRef.current
+    if (!el) return
+    el.srcObject = remoteStream
+    if (remoteStream) el.play().catch(() => {})
+  }, [remoteStream])
+
+  useEffect(() => onSocketEvent('gift:received', ({ beansCredited }) => setGiftBeans((b) => b + (beansCredited || 0))), [])
 
   useEffect(() => { sessionRef.current?.localAudioTrack?.setEnabled(!muted) }, [muted])
   useEffect(() => { sessionRef.current?.localVideoTrack?.setEnabled(cam) }, [cam])
@@ -608,7 +646,7 @@ export function ActiveCall() {
     return {
       x: Math.min(Math.max(x, PIP_MARGIN), Math.max(PIP_MARGIN, rect.width - PIP_W - PIP_MARGIN)),
       // keep clear of the header card up top and the control row at the bottom
-      y: Math.min(Math.max(y, 88), Math.max(88, rect.height - PIP_H - 110)),
+      y: Math.min(Math.max(y, 104), Math.max(104, rect.height - PIP_H - 150)),
     }
   }
 
@@ -616,7 +654,7 @@ export function ActiveCall() {
     const rect = stageRef.current?.getBoundingClientRect()
     if (!rect) return
     const origX = pipPos ? pipPos.x : rect.width - PIP_W - 16
-    const origY = pipPos ? pipPos.y : 96
+    const origY = pipPos ? pipPos.y : 112
     dragRef.current = { dragging: true, moved: false, startX: e.clientX, startY: e.clientY, origX, origY }
     e.currentTarget.setPointerCapture?.(e.pointerId)
   }
@@ -655,7 +693,9 @@ export function ActiveCall() {
     })
   }, [counterpartId])
 
-  const estBeans = Math.round((ratePaise * elapsed) / 60)
+  // Earnings so far, ticking up once per completed minute at this call's rate. An estimate from
+  // the rate snapshot (the final figure comes with the call summary).
+  const liveEarnedPaise = ratePaise * Math.floor(elapsed / 60)
 
   const endCall = async () => {
     if (sessionRef.current) {
@@ -674,32 +714,40 @@ export function ActiveCall() {
     }
   }
 
+  const pipStyle = { top: pipPos ? pipPos.y : 112, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }
+
   return (
     <ImmersiveLayout>
-      <div ref={stageRef} className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden text-white bg-gradient-to-b from-night-700 to-night-900">
-        <StatusBar dark />
-        <div className="w-full max-w-[480px] mx-auto px-4 pt-2 space-y-2">
-          {/* bg-black/45 (not the near-invisible white/8 this used to be) so the card actually
-              reads as a distinct floating element against an equally-dark video background,
-              instead of blending into it as a flat full-width strip. */}
-          <div className="rounded-2xl bg-black/45 backdrop-blur-md shadow-lg shadow-black/30 px-3.5 py-2.5 flex items-center gap-3 border border-white/10">
-            <Avatar name={callerName} size={38} className="ring-2 ring-white/15" />
+      {/* Edge to edge: the video fills the whole screen; the header and controls float on top
+          of it over soft dark fades (not solid strips that ate a quarter of the picture). */}
+      <div ref={stageRef} className={`relative h-[100dvh] w-full overflow-hidden text-white ${isVoice ? 'bg-gradient-to-b from-night-700 to-night-900' : 'bg-black'}`}>
+        <div className="absolute inset-x-0 top-0 z-30 bg-gradient-to-b from-black/70 via-black/35 to-transparent pb-10 pointer-events-none">
+          <StatusBar dark />
+          <div className="w-full max-w-[520px] mx-auto px-4 pt-1 flex items-center gap-3 pointer-events-auto">
+            <Avatar name={callerName} size={40} className="ring-2 ring-white/20" />
             <div className="flex-1 min-w-0">
-              <p className="text-[15px] font-semibold truncate">{callerName}</p>
-              <p className="text-[11.5px] text-white/55 flex items-center gap-1.5 mt-0.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {mm}:{ss} · {isVoice ? 'Voice call' : 'HD'}
+              <p className="text-[16px] font-semibold truncate drop-shadow">{callerName}</p>
+              <p className="text-[12px] text-white/75 flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {mm}:{ss}
+                {remoteSeen && remoteMuted && <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/80 px-1.5 py-px text-[10.5px] font-semibold text-white"><Icon name="mic-off" size={10} /> Muted</span>}
               </p>
             </div>
-            <span className="flex items-center gap-1.5 shrink-0 rounded-full bg-gold-400/15 border border-gold-400/25 px-2.5 py-1.5 text-[13px] font-bold text-gold-300">
-              <Icon name="gift" size={13} /> {estBeans}
+            <span className="flex flex-col items-end shrink-0 rounded-2xl bg-black/35 backdrop-blur-md border border-emerald-300/20 px-2.5 py-1" title="Earned so far on this call (estimate)">
+              <span className="text-[14px] font-extrabold text-emerald-300 tabular-nums">{rupees(liveEarnedPaise)}</span>
+              <span className="text-[9.5px] text-white/60 -mt-0.5">earned</span>
+            </span>
+            <span className="flex flex-col items-center shrink-0 rounded-2xl bg-black/35 backdrop-blur-md border border-gold-400/25 px-2.5 py-1" title="Gifts received on this call">
+              <span className="flex items-center gap-1 text-[14px] font-extrabold text-gold-300 tabular-nums"><Icon name="gift" size={12} />{giftBeans}</span>
+              <span className="text-[9.5px] text-white/60 -mt-0.5">gifts</span>
             </span>
           </div>
-          {callErr && <p className="text-[12px] text-rose-300 px-1">{callErr}</p>}
+          {callErr && <p className="max-w-[520px] mx-auto px-4 mt-1 text-[12px] text-rose-300">{callErr}</p>}
         </div>
+
         {isVoice ? (
           <>
             {/* Voice call — nothing to show but who you're talking to. */}
-            <div className="flex-1 flex flex-col items-center justify-center px-6">
+            <div className="absolute inset-0 flex flex-col items-center justify-center px-6">
               <div className="relative">
                 <span className="absolute inset-0 rounded-full bg-brand-400/30 animate-pulse-ring" />
                 <Avatar name={callerName} size={140} className="ring-4 ring-white/15" />
@@ -711,28 +759,31 @@ export function ActiveCall() {
           </>
         ) : (
           <>
-            {/* The small PIP tile is freely draggable anywhere on screen — like WhatsApp's
-                self-view bubble — and a plain tap (no movement) still swaps which video is
-                full-screen, same as before. Whichever is small stays `absolute` with an explicit
-                z-20; the big one is a plain in-flow `flex-1 relative` — that z-gap is what keeps
-                the small tile painting on top regardless of which video it currently holds (see
-                the stacking-order note this was originally added for). */}
+            {/* The small PIP tile is freely draggable (like WhatsApp's self-view bubble); a plain
+                tap swaps which video is full-screen. The big one fills the screen (absolute
+                inset-0); the small one sits above it at z-20, below the header/controls (z-30). */}
             <button
               onPointerDown={mainView === 'remote' ? onPipPointerDown : undefined}
               onPointerMove={mainView === 'remote' ? onPipPointerMove : undefined}
               onPointerUp={mainView === 'remote' ? onPipPointerUp : undefined}
               onPointerCancel={mainView === 'remote' ? onPipPointerUp : undefined}
-              style={mainView === 'local' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
+              style={mainView === 'local' ? undefined : pipStyle}
               className={mainView === 'local'
-                ? 'flex-1 relative w-full text-left'
-                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800 cursor-grab active:cursor-grabbing'}
+                ? 'absolute inset-0 w-full text-left'
+                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800 ring-1 ring-white/20 shadow-xl shadow-black/40 cursor-grab active:cursor-grabbing'}
             >
               <div ref={localVideoRef} className="absolute inset-0 agora-video-fill" />
+              {!cam && (
+                <div className="absolute inset-0 grid place-items-center bg-night-800/90 text-white/70">
+                  <span className="flex flex-col items-center gap-1 text-[11px]"><Icon name="camera-off" size={mainView === 'local' ? 28 : 18} />{mainView === 'local' && 'Your camera is off'}</span>
+                </div>
+              )}
               <span
                 onClick={(e) => { e.stopPropagation(); flipCamera() }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onPointerUp={(e) => e.stopPropagation()}
-                className={`absolute grid place-items-center rounded-full bg-black/50 text-white ${mainView === 'local' ? 'bottom-4 right-4 h-10 w-10' : 'bottom-1 right-1 h-7 w-7'} ${flipping ? 'opacity-50' : ''}`}
+                className={`absolute grid place-items-center rounded-full bg-black/50 text-white ${mainView === 'local' ? 'bottom-36 right-4 h-10 w-10' : 'bottom-1 right-1 h-7 w-7'} ${flipping ? 'opacity-50' : ''}`}
+                aria-label="Switch camera"
               >
                 <Icon name="flip" size={mainView === 'local' ? 16 : 13} />
               </span>
@@ -742,32 +793,69 @@ export function ActiveCall() {
               onPointerMove={mainView === 'local' ? onPipPointerMove : undefined}
               onPointerUp={mainView === 'local' ? onPipPointerUp : undefined}
               onPointerCancel={mainView === 'local' ? onPipPointerUp : undefined}
-              style={mainView === 'remote' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
+              style={mainView === 'remote' ? undefined : pipStyle}
               className={mainView === 'remote'
-                ? 'flex-1 relative w-full text-left'
-                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-black text-left cursor-grab active:cursor-grabbing'}
+                ? 'absolute inset-0 w-full text-left'
+                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-black text-left ring-1 ring-white/20 shadow-xl shadow-black/40 cursor-grab active:cursor-grabbing'}
             >
-              <div ref={remoteVideoRef} className="absolute inset-0 agora-video-fill" />
+              {/* blurred copy of the same video fills the space around the full (uncropped) picture */}
+              <video ref={remoteBgRef} autoPlay muted playsInline aria-hidden className={`absolute inset-0 h-full w-full object-cover scale-110 blur-2xl brightness-75 transition-opacity ${remoteJoined ? 'opacity-100' : 'opacity-0'}`} />
+              <div ref={remoteVideoRef} className="absolute inset-0 agora-video-contain" />
               {!remoteJoined && (
-                <div className="absolute inset-0 grid place-items-center">
-                  {rtcErr ? <p className="text-[13px] text-white/60 px-8 text-center">{rtcErr}</p> : <div className="h-56 w-56 rounded-full bg-white/5" />}
+                <div className="absolute inset-0 grid place-items-center bg-gradient-to-b from-night-700 to-night-900">
+                  {rtcErr && !remoteSeen ? <p className="text-[13px] text-white/60 px-8 text-center">{rtcErr}</p> : (
+                    <div className="flex flex-col items-center text-center">
+                      <div className="relative">
+                        {!remoteSeen && <span className="absolute inset-0 rounded-full bg-brand-400/30 animate-pulse-ring" />}
+                        <Avatar name={callerName} size={mainView === 'remote' ? 120 : 52} className="ring-4 ring-white/10" />
+                      </div>
+                      {mainView === 'remote' && (
+                        <p className="mt-4 text-[13px] text-white/70 flex items-center gap-1.5">
+                          {remoteSeen ? <><Icon name="camera-off" size={14} /> {callerName} turned their camera off</> : 'Connecting video…'}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </button>
           </>
         )}
-        <div className="w-full max-w-[480px] mx-auto pb-8 px-6 flex items-center justify-between">
-          <button onClick={() => setMuted((m) => !m)} className={`h-12 w-12 grid place-items-center rounded-full ${muted ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name={muted ? 'mic-off' : 'mic'} size={20} /></button>
-          {!isVoice && (
-            <>
-              <button onClick={() => setCam((c) => !c)} className={`h-12 w-12 grid place-items-center rounded-full ${cam ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={cam ? 'video' : 'camera-off'} size={20} /></button>
-              <button onClick={() => (beautyOpen ? closeBeauty() : openBeauty())} className={`h-12 w-12 grid place-items-center rounded-full ${beautyOpen ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name="sparkles" size={20} /></button>
-            </>
-          )}
-          <button onClick={() => { if (beautyOpen) closeBeauty(); setChatOpen((o) => !o) }} className={`h-12 w-12 grid place-items-center rounded-full ${chatOpen ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name="chat" size={20} /></button>
-          <button onClick={() => setGiftOpen(true)} className="h-12 w-12 grid place-items-center rounded-full bg-white/12"><Icon name="gift" size={20} /></button>
-          <button onClick={endCall} disabled={ending} className="h-14 w-14 grid place-items-center rounded-full bg-rose-500"><Icon name="phone-off" size={22} /></button>
+
+        {/* controls — floating over a dark fade, each labelled */}
+        <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-16 pb-6">
+          <div className="w-full max-w-[520px] mx-auto px-3 flex items-end justify-between">
+            <CallControl icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onClick={() => setMuted((m) => !m)} />
+            {!isVoice && (
+              <>
+                <CallControl icon={cam ? 'video' : 'camera-off'} label={cam ? 'Stop video' : 'Start video'} active={!cam} onClick={() => setCam((c) => !c)} />
+                <CallControl icon="sparkles" label="Beauty" active={beautyOpen} onClick={() => (beautyOpen ? closeBeauty() : openBeauty())} />
+              </>
+            )}
+            <CallControl icon="chat" label="Chat" active={chatOpen} onClick={() => { if (beautyOpen) closeBeauty(); setChatOpen((o) => !o) }} />
+            <CallControl icon="gift" label="Ask gift" onClick={() => setGiftOpen(true)} />
+            <CallControl icon="phone-off" label="End" danger disabled={ending} onClick={() => setConfirmEnd(true)} />
+          </div>
         </div>
+
+        {/* Hanging up by accident costs the host money — confirm first. */}
+        {confirmEnd && (
+          <div className="absolute inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-[2px] p-4 animate-fade-in" onClick={() => setConfirmEnd(false)}>
+            <div className="w-full max-w-[360px] rounded-3xl bg-white p-5 text-ink-900 shadow-pop animate-pop-in" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-label="End call?">
+              <div className="flex items-center gap-3">
+                <span className="grid place-items-center h-11 w-11 rounded-full bg-rose-50 text-rose-500 shrink-0"><Icon name="phone-off" size={18} /></span>
+                <div className="min-w-0">
+                  <p className="text-[17px] font-bold truncate">End call with {callerName}?</p>
+                  <p className="text-[13px] text-ink-400">You've talked {mm}:{ss}{ratePaise ? ` · ≈ ${rupees(liveEarnedPaise)} earned` : ''}</p>
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-2.5">
+                <button onClick={() => setConfirmEnd(false)} className="rounded-2xl bg-black/5 py-3 text-[14px] font-semibold text-ink-700">Keep talking</button>
+                <button onClick={() => { setConfirmEnd(false); endCall() }} disabled={ending} className="rounded-2xl bg-rose-500 py-3 text-[14px] font-semibold text-white disabled:opacity-60">End call</button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Overlay, not a route — navigating away used to unmount this screen entirely and
             tear down the live Agora session just to ask for a gift. */}
         {giftOpen && <GiftRequestSheet userId={counterpartId} onClose={() => setGiftOpen(false)} />}
@@ -777,7 +865,7 @@ export function ActiveCall() {
         {!chatOpen && !beautyOpen && (
           <FloatingComments
             comments={recentComments(chatMessages.filter((m) => m.senderId === counterpartId).map((m) => ({ id: m.id, name: callerName, text: m.content, at: m.at })), 4)}
-            className="absolute left-4 right-4 bottom-28 z-20 max-h-[35%] pointer-events-none"
+            className="absolute left-4 right-4 bottom-36 z-20 max-h-[35%] pointer-events-none"
           />
         )}
         {beautyOpen && <CallBeautySheet settings={beauty} onChange={updateBeauty} onClose={closeBeauty} />}

@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import Icon from './Icon.jsx'
-import { DEFAULT_CUSTOM, DEFAULT_BEAUTY_SETTINGS } from '../lib/beautyFilter.js'
+import { DEFAULT_CUSTOM, DEFAULT_BEAUTY_SETTINGS, DEFAULT_RESHAPE } from '../lib/beautyFilter.js'
 import { BEAUTY_PRESETS } from '../lib/beautyPresets.js'
 import { COLOR_FILTERS } from '../lib/colorFilters.js'
 import { BEAUTY_LOOKS, matchLook } from '../lib/beautyLooks.js'
@@ -16,6 +16,12 @@ const CUSTOM_SLIDERS = [
   ['shadows', 'Shadows'],
   ['sharpness', 'Sharpness'],
   ['vibrance', 'Vibrance'],
+]
+
+// Face reshape — 0..100, face-aware geometry warp (WebGL2 renderer only).
+const RESHAPE_SLIDERS = [
+  ['faceSlim', 'Face Slim'],
+  ['eyeEnlarge', 'Eye Enlarge'],
 ]
 
 const TABS = [
@@ -90,7 +96,9 @@ export function BeautyControls({ settings, onChange, dark = false, compact = fal
     apply({ preset: { ...settings.preset, intensity } })
   }
   const setCustom = (key, value) => apply({ custom: { ...settings.custom, [key]: value } })
-  const resetCustom = () => onChange({ custom: { ...DEFAULT_CUSTOM } })
+  const reshape = { ...DEFAULT_RESHAPE, ...settings.reshape }
+  const setReshape = (key, value) => apply({ reshape: { ...reshape, [key]: value } })
+  const resetCustom = () => onChange({ custom: { ...DEFAULT_CUSTOM }, reshape: { ...DEFAULT_RESHAPE } })
   const activeLook = matchLook(settings)
 
   // Scrolls a carousel by roughly one row's width per tap — an explicit click target
@@ -192,6 +200,15 @@ export function BeautyControls({ settings, onChange, dark = false, compact = fal
 
       {tab === 'custom' && (
         <div className={`${gap} space-y-4 ${disabledCls}`}>
+          {RESHAPE_SLIDERS.map(([key, label]) => (
+            <div key={key}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className={`text-[12px] font-semibold ${t.label}`}>{label}</span>
+                <span className={`text-[12px] font-bold ${t.accentValue}`}>{reshape[key]}</span>
+              </div>
+              <input type="range" min="0" max="100" value={reshape[key]} onChange={(e) => setReshape(key, Number(e.target.value))} className="w-full accent-brand-600" aria-label={label} />
+            </div>
+          ))}
           {CUSTOM_SLIDERS.map(([key, label]) => (
             <div key={key}>
               <div className="flex items-center justify-between mb-1.5">
