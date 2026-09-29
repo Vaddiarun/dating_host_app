@@ -58,7 +58,7 @@ export function Splash() {
 export function Login() {
   const nav = useNavigate()
   const { requestOtp } = useAuth()
-  const [num, setNum] = useState('98765 43210')
+  const [num, setNum] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -89,7 +89,16 @@ export function Login() {
         <p className="text-[14px] text-ink-400 mt-1">We'll text a 6-digit code to verify it's you.</p>
         <div className="mt-6 flex gap-2">
           <div className="input w-[86px] flex items-center justify-center gap-1 font-semibold">🇮🇳 +91</div>
-          <input value={num} onChange={(e) => setNum(e.target.value)} className="input flex-1" inputMode="numeric" />
+          <input
+            value={num}
+            onChange={(e) => { setNum(e.target.value.replace(/\D/g, '').slice(0, 10)); setErr('') }}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+            placeholder="98765 43210"
+            className="input flex-1"
+            inputMode="numeric"
+            autoComplete="tel-national"
+            maxLength={10}
+          />
         </div>
         <ErrorCard message={err} compact className="mt-2" />
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-black/[.03] px-3 py-2.5 text-[12px] text-ink-400">
