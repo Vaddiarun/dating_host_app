@@ -84,7 +84,7 @@ function Thread({ conv }) {
     if (!recipientId) return
     return onSocketEventWhenReady('chat:message', (m) => {
       if (m.conversationId !== conv.id && m.senderId !== recipientId) return
-      setMessages((prev) => (prev.some((x) => x.id === m.messageId) ? prev : [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, type: m.type, mediaUrl: m.mediaUrl, createdAt: m.createdAt }]))
+      setMessages((prev) => (prev.some((x) => x.id === m.messageId) ? prev : [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, type: m.type, mediaUrl: m.mediaUrl, gift: m.gift, createdAt: m.createdAt }]))
     })
   }, [conv.id, recipientId])
 
@@ -122,6 +122,22 @@ function Thread({ conv }) {
         {!loading && !err && messages.length === 0 && <p className="text-center text-[12px] text-ink-300">No messages yet — say hello!</p>}
         {messages.map((m) => {
           const mine = m.senderId !== recipientId
+          if (m.type === 'gift') {
+            return (
+              <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                <div className="flex max-w-[78%] animate-pop-in items-center gap-3 rounded-2xl border border-gold-100 bg-gradient-to-br from-gold-50 to-rose-50 px-3.5 py-3">
+                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-white shadow-sm">
+                    {m.gift?.iconUrl ? <img src={m.gift.iconUrl} alt="" className="h-9 w-9 object-contain" /> : <Icon name="gift" size={24} className="text-gold-500" />}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-gold-600">{mine ? 'Gift sent' : `${name} sent you a gift`}</p>
+                    <p className="text-[15px] font-bold text-ink-900">{m.gift?.name || 'Gift'}</p>
+                    <p className="text-[10px] text-ink-300">{clockTime(m.createdAt)}</p>
+                  </div>
+                </div>
+              </div>
+            )
+          }
           if (isImageMessage(m)) {
             return (
               <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>

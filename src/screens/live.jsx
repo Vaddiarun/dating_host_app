@@ -211,6 +211,19 @@ export function Broadcast() {
     })
   }, [broadcastId])
 
+  // Gifts from viewers also appear in the comments ("Rahul sent a Rose 🎁"), the same way the
+  // viewer sees their own gift in their feed — the popup alone never said who sent what.
+  // gift:received is the host's own event; skip one that's for a call or another broadcast.
+  useEffect(() => {
+    if (!broadcastId) return
+    return onSocketEventWhenReady('gift:received', (p) => {
+      if (p?.context && p.context !== 'live') return
+      if (p?.broadcastId && p.broadcastId !== broadcastId) return
+      const giftName = p?.gift?.name || 'gift'
+      setChat((c) => [...c, { id: ++msgIdRef.current, n: p?.senderName || 'Viewer', t: `sent a ${giftName} 🎁`, gift: true, at: Date.now() }])
+    })
+  }, [broadcastId])
+
   // No push event for viewer count yet — poll the broadcast for the live figure.
   useEffect(() => {
     if (!broadcastId) return
@@ -350,7 +363,7 @@ export function Broadcast() {
   }
 
   // Keep only the last few seconds of comments, newest last — old ones age out on their own each tick.
-  const visibleChat = recentComments(chat.map((c) => ({ id: c.id, name: c.n, text: c.t, at: c.at })), 8)
+  const visibleChat = recentComments(chat.map((c) => ({ id: c.id, name: c.n, text: c.t, gift: c.gift, at: c.at })), 8)
 
   const end = async () => {
     setEnding(true)

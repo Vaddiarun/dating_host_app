@@ -9,7 +9,7 @@ import { GiftRays, ConfettiBurst, FloatingSparkles, useCountUpFrom0 } from '../u
 
 const GIFT_POPUP_MS = 5000
 
-/** A gift is a real-money, worth-celebrating moment â€” centered like a real celebration
+/** A gift is a real-money, worth-celebrating moment — centered like a real celebration
  * rather than tucked in a corner: the gift pops in over spinning light rays, confetti bursts
  * out of it, sparkles drift up, and the credited beans count up. A thin bar shows when it will
  * close by itself. Tapping the backdrop (or the card's own dismiss) closes it early. Sits on
@@ -61,13 +61,13 @@ function GiftPopup({ data, onClose }) {
 export default function RealtimeBridge() {
   const { status, refreshMe } = useAuth()
   const nav = useNavigate()
-  const [toast, setToast] = useState(null) // { icon, title } | null â€” quiet one-liners
+  const [toast, setToast] = useState(null) // { icon, title } | null — quiet one-liners
   const [gift, setGift] = useState(null) // { senderName?, giftName, beansCredited } | null
   const toastTimerRef = useRef(null)
   const giftTimerRef = useRef(null)
 
   // The incoming-call ringtone fires from an async socket push, with no click/tap happening
-  // at that exact moment â€” a browser only lets audio actually play if its AudioContext was
+  // at that exact moment — a browser only lets audio actually play if its AudioContext was
   // resumed from inside a real user gesture, so without this the ring would be silently
   // dropped the very first time a call comes in. Any tap/keypress anywhere in the app while
   // logged in warms it up ahead of time, well before a real call needs it.
@@ -99,7 +99,7 @@ export default function RealtimeBridge() {
       // `at` keys the popup, so a second gift arriving while one is showing replays the
       // celebration instead of silently swapping the text.
       setGift({ ...data, at: Date.now() })
-      try { playChime() } catch { /* audio not unlocked yet â€” the visual still plays */ }
+      try { playChime() } catch { /* audio not unlocked yet — the visual still plays */ }
       giftTimerRef.current = setTimeout(() => setGift(null), GIFT_POPUP_MS)
     }
 
@@ -113,13 +113,13 @@ export default function RealtimeBridge() {
       unsubs.push(onSocketEvent('call:incoming', ({ callId, userId, callerName, ratePerMinutePaise, type, callType }) => {
         const params = new URLSearchParams({ callId, callerId: userId ?? '', rate: ratePerMinutePaise ?? '' })
         if (callerName) params.set('callerName', callerName)
-        // voice vs video â€” IncomingCall falls back to fetching the call if this isn't in the payload
+        // voice vs video — IncomingCall falls back to fetching the call if this isn't in the payload
         if (type || callType) params.set('type', type || callType)
         nav(`/call/incoming?${params.toString()}`)
       }))
 
       // call:ended also fires for a call that rang out unanswered or was declined
-      // (status: "missed" | "rejected") â€” the host is on /call/incoming or
+      // (status: "missed" | "rejected") — the host is on /call/incoming or
       // /call/connecting then, not /call/active, and there's nothing to summarize.
       unsubs.push(onSocketEvent('call:ended', ({ callId, status: callStatus }) => {
         const hash = window.location.hash
@@ -138,14 +138,14 @@ export default function RealtimeBridge() {
 
       // Levels go up automatically on the backend as earnings cross each 1,00,000-bean mark.
       unsubs.push(onSocketEvent('host:level-up', ({ level }) => {
-        showToast('crown', `Level up! You're now Level ${level} â€” your max prices went up`)
+        showToast('crown', `Level up! You're now Level ${level} — your max prices went up`)
       }))
 
       unsubs.push(onSocketEvent('gift:requestDeclined', () => {
         showToast('gift', 'Gift request declined')
       }))
 
-      // Only steer navigation while the host is somewhere in the onboarding flow â€”
+      // Only steer navigation while the host is somewhere in the onboarding flow —
       // once approved they're on the real app and this shouldn't ever fire again anyway.
       unsubs.push(onSocketEvent('kyc:decision', async ({ status: kycStatus, rejectionReason }) => {
         const me = await refreshMe().catch(() => null)

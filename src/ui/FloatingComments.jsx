@@ -32,6 +32,7 @@ export function FloatingComments({ comments, fadeOut = true, scrollable = false,
                   <span className="block text-[12px] font-bold text-white/85">{c.name}</span>
                   {c.image
                     ? <ChatPhoto src={c.image} status={c.status} onOpen={onOpenImage} />
+                    : c.gift ? <span className="font-semibold text-amber-300">{c.text}</span>
                     : isJumboEmoji(c.text) ? <span className="text-[30px] leading-tight">{c.text}</span> : c.text}
                 </div>
               </div>

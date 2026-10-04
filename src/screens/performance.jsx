@@ -65,40 +65,29 @@ function InviteBanner() {
 /* No backend field for any of this yet (performance score, conversion, livestream score) —
  * shown as a static placeholder per product's request, clearly separate from the real
  * online/offline card above it. Swap for real numbers once the backend exposes them. */
-// Gauge dial geometry, shared by the coloured segments and the tick marks below.
-const GAUGE_R = 42
-const GAUGE_CX = 50
-const GAUGE_CY = 52
-function gaugePoint(t) {
-  const ang = Math.PI * (1 - t) // t=0 -> 180deg (left end), t=1 -> 0deg (right end)
-  return [GAUGE_CX + GAUGE_R * Math.cos(ang), GAUGE_CY - GAUGE_R * Math.sin(ang)]
-}
-function gaugeArc(t0, t1) {
-  const [x0, y0] = gaugePoint(t0)
-  const [x1, y1] = gaugePoint(t1)
-  return `M${x0.toFixed(2)},${y0.toFixed(2)} A${GAUGE_R},${GAUGE_R} 0 0,1 ${x1.toFixed(2)},${y1.toFixed(2)}`
-}
-// Four bands (red/orange/yellow/green) each pulled in from its quarter boundary so a visible
-// gap separates one colour from the next, instead of one continuous gradient stroke.
-const GAUGE_GAP = 0.014
-const GAUGE_BANDS = [
-  ['#e2415a', 0, 0.25],
-  ['#f0a63c', 0.25, 0.5],
-  ['#e9d24a', 0.5, 0.75],
-  ['#3fb96f', 0.75, 1],
-].map(([color, t0, t1]) => [color, t0 + GAUGE_GAP, t1 - GAUGE_GAP])
+// LED-segment meter: a half-ring of bars that light up one by one up to the score (no needle).
+const LED_CX = 100
+const LED_CY = 104
+const LED_COUNT = 28
+const ledColor = (t) => (t < 0.25 ? '#f43f5e' : t < 0.5 ? '#f59e0b' : t < 0.75 ? '#eab308' : '#10b981')
+const LED_SEGMENTS = Array.from({ length: LED_COUNT }, (_, i) => {
+  const t = (i + 0.5) / LED_COUNT
+  const a = Math.PI * (1 - t) // t=0 left end, t=1 right end
+  const p = (r) => [LED_CX + r * Math.cos(a), LED_CY - r * Math.sin(a)]
+  const [x1, y1] = p(64)
+  const [x2, y2] = p(88)
+  return { t, x1, y1, x2, y2, color: ledColor(t) }
+})
 
 function PerformanceMeter() {
-  const pct = 0.86 // decorative position along the dial for the "100+ / Excellent" tier
-  const [swept, setSwept] = useState(false)
-  // Needle starts pinned at the low end and sweeps into place on mount, like a real dashboard
-  // gauge — requestAnimationFrame (not a plain state-on-mount) so the browser actually paints
-  // the 0% frame first before the CSS transition kicks in, or it'd just snap straight there.
+  const pct = 0.86 // how far the bars light up for the "100+ / Excellent" tier (placeholder until the backend sends a score)
+  const [lit, setLit] = useState(false)
+  // Bars start dim and light up in sequence on mount — requestAnimationFrame so the dim frame
+  // paints first and the CSS transitions actually run instead of snapping.
   useEffect(() => {
-    const id = requestAnimationFrame(() => setSwept(true))
+    const id = requestAnimationFrame(() => setLit(true))
     return () => cancelAnimationFrame(id)
   }, [])
-  const needleDeg = ((swept ? pct : 0) - 0.5) * 180 // -90deg (low end) .. +90deg (high end)
 
   return (
     <div className="card p-4">
@@ -106,28 +95,24 @@ function PerformanceMeter() {
         <SectionTitle className="!mb-0">Performance Meter</SectionTitle>
         <Icon name="help" size={13} className="text-ink-300" />
       </div>
-      <div className="flex flex-col items-center pt-1">
-        <svg viewBox="0 0 100 56" className="w-48 h-auto overflow-visible">
-          {GAUGE_BANDS.map(([color, t0, t1]) => (
-            <path key={color} d={gaugeArc(t0, t1)} fill="none" stroke={color} strokeWidth="9" strokeLinecap="round" />
+      <div className="flex flex-col items-center">
+        <svg viewBox="0 0 200 112" className="w-60 max-w-full h-auto">
+          {LED_SEGMENTS.map((s, i) => (
+            <line
+              key={i}
+              x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2}
+              stroke={s.color} strokeWidth="5.5" strokeLinecap="round"
+              style={{ opacity: lit && s.t <= pct ? 1 : 0.15, transition: 'opacity 400ms ease', transitionDelay: `${i * 35}ms` }}
+            />
           ))}
-          {/* pulled in a few units from the arc (28→34 instead of 33→38.5) so there's a clear
-              gap between the tick marks and the coloured band instead of touching it */}
-          {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-            const ang = Math.PI * (1 - t)
-            const x1 = 50 + 28 * Math.cos(ang), y1 = 52 - 28 * Math.sin(ang)
-            const x2 = 50 + 34 * Math.cos(ang), y2 = 52 - 34 * Math.sin(ang)
-            return <line key={t} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth="1.5" />
-          })}
-          {/* longer needle (y=15→9) so it reaches higher toward the arc */}
-          <g style={{ transform: `rotate(${needleDeg}deg)`, transformOrigin: '50px 52px', transition: 'transform 900ms cubic-bezier(.22,1,.36,1)' }}>
-            <line x1="50" y1="52" x2="50" y2="9" stroke="#1c1330" strokeWidth="2.5" strokeLinecap="round" />
-          </g>
-          <circle cx="50" cy="52" r="4.5" fill="#1c1330" />
+          <text x={LED_CX} y={LED_CY - 12} textAnchor="middle" fontSize="28" fontWeight="800" fill="#1c1330">100+</text>
+          <text x={LED_CX} y={LED_CY + 2} textAnchor="middle" fontSize="8.5" fontWeight="700" letterSpacing="1" fill="#8c8a96">SCORE</text>
         </svg>
-        <p className="text-[22px] font-extrabold text-ink-900 -mt-1">100+</p>
-        <p className="text-[12px] font-semibold text-emerald-600">Excellent</p>
-        <p className="text-[11px] text-ink-400 mt-1">Conversion 46:11</p>
+
+        <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[12px] font-bold text-emerald-700">
+          <Icon name="trending-up" size={12} /> Excellent
+        </span>
+        <p className="text-[11.5px] text-ink-400 mt-2">Conversion <span className="font-semibold text-ink-700">46:11</span></p>
       </div>
     </div>
   )
