@@ -5,6 +5,7 @@ import { StatusBar, PlainHeader, Avatar, Toggle } from '../ui/kit.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
 import { live as liveApi } from '../api/index.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
+import { publishToSfu } from '../lib/sfu.js'
 import { getBeautySettings, openBeautyCamera, openCameraFacing } from '../lib/beautyFilter.js'
 import { useAuth } from '../state/AuthContext.jsx'
 import { ErrorCard } from '../ui/kit.jsx'
@@ -110,7 +111,7 @@ export function GoLive() {
     try {
       const res = await liveApi.start(title.trim() || 'Live stream')
       stopCamera() // release the preview camera; Broadcast opens its own (Agora-published) one
-      nav(`/live/broadcast?broadcastId=${res.broadcastId}`, { state: { channelName: res.channelName, agoraToken: res.agoraToken, micOn: mic, giftsOn: gifts } })
+      nav(`/live/broadcast?broadcastId=${res.broadcastId}`, { state: { channelName: res.channelName, mediaProvider: res.mediaProvider || 'agora', agoraToken: res.agoraToken, iceServers: res.iceServers, micOn: mic, giftsOn: gifts } })
     } catch (e) {
       setErr(errorMessage(e, 'Could not start the broadcast.'))
     } finally {
@@ -156,7 +157,11 @@ export function Broadcast() {
   const location = useLocation()
   const { me } = useAuth()
   const broadcastId = sp.get('broadcastId')
-  const { channelName, agoraToken, micOn = true } = location.state || {}
+  // mediaProvider: which network carries this broadcast — admin-switchable on the backend,
+  // fixed per broadcast. 'agora' publishes with agoraToken; 'cloudflare' pushes to Cloudflare's
+  // SFU (lib/sfu.js) using iceServers.
+  const { channelName, mediaProvider = 'agora', agoraToken, iceServers, micOn = true } = location.state || {}
+  const isSfu = mediaProvider === 'cloudflare'
   const [chat, setChat] = useState([])
   const [text, setText] = useState('')
   const [ending, setEnding] = useState(false)
@@ -207,8 +212,8 @@ export function Broadcast() {
   }, [broadcastId])
 
   useEffect(() => {
-    if (!channelName || !agoraToken) { setRtcErr('No stream credentials — rejoin from Go live.'); return }
-    const key = `${channelName}|${agoraToken}`
+    if (isSfu ? !broadcastId || !iceServers : !channelName || !agoraToken) { setRtcErr('No stream credentials — rejoin from Go live.'); return }
+    const key = isSfu ? `sfu|${broadcastId}` : `${channelName}|${agoraToken}`
     clearTimeout(leaveTimerRef.current)
     let cancelled = false
 
@@ -228,7 +233,9 @@ export function Broadcast() {
         // issues a PUBLISHER-role token for the host (live.routes.ts) — that only actually
         // grants publish rights under Agora's Live Broadcasting profile, which plain 'rtc'
         // mode ignores.
-        promise: joinAndPublish({ channelName, token: agoraToken, uid: me?.id, mode: 'live', role: 'host', beautySettings: getBeautySettings() }),
+        promise: isSfu
+          ? publishToSfu({ iceServers, beautySettings: getBeautySettings(), publish: (sdp, tracks) => liveApi.sfuPublish(broadcastId, sdp, tracks) })
+          : joinAndPublish({ channelName, token: agoraToken, uid: me?.id, mode: 'live', role: 'host', beautySettings: getBeautySettings() }),
       }
     }
 
@@ -245,13 +252,14 @@ export function Broadcast() {
         // a viewer's *Agora* client actually connected, as opposed to just being recorded as
         // "in the room" by the backend. If this stays 0 while the backend viewerCount is >0,
         // the break is on the viewer app's Agora join, not anything in this broadcast screen.
+        if (session.kind === 'sfu') return // Agora-only diagnostic
         session.client.on('user-joined', () => setAgoraPeers(session.client.remoteUsers.length))
         session.client.on('user-left', () => setAgoraPeers(session.client.remoteUsers.length))
         setAgoraPeers(session.client.remoteUsers.length)
       })
       .catch((e) => {
         if (cancelled) return
-        console.error('Agora join failed:', e)
+        console.error(`${isSfu ? 'Cloudflare SFU publish' : 'Agora join'} failed:`, e)
         setRtcErr(errorMessage(e, 'Could not start the camera/mic for this broadcast.'))
       })
 
@@ -356,7 +364,7 @@ export function Broadcast() {
           {/* Diagnostic: how many of those viewers Agora itself sees as actually connected.
               If this is 0 while the count above isn't, the viewer app never joined the Agora
               channel — the problem is on their side, not in this broadcast. */}
-          <span className={`pill text-[12px] ${agoraPeers > 0 ? 'bg-emerald-500/30 text-emerald-200' : 'bg-black/40 text-white/60'}`} title="Viewers Agora itself sees as connected"><Icon name="live" size={12} /> RTC {agoraPeers}</span>
+          {!isSfu && <span className={`pill text-[12px] ${agoraPeers > 0 ? 'bg-emerald-500/30 text-emerald-200' : 'bg-black/40 text-white/60'}`} title="Viewers Agora itself sees as connected"><Icon name="live" size={12} /> RTC {agoraPeers}</span>}
           <button onClick={flipCamera} disabled={flipping} className="ml-auto h-9 w-9 grid place-items-center rounded-full bg-black/40 text-white disabled:opacity-50"><Icon name="flip" size={16} /></button>
         </div>
         <div className="flex-1 relative overflow-hidden">

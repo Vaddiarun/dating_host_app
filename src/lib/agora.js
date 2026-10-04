@@ -97,6 +97,20 @@ export async function leaveChannel({ client, localAudioTrack, localVideoTrack, b
   }
 }
 
+/** Summary for POST /calls/:id/media-report — call before leaveChannel(). Agora's SDK only
+ * exposes current values (not whole-call averages), so these are end-of-call snapshots. */
+export function getAgoraCallStats(client, connected) {
+  const report = { connected }
+  const rtc = client.getRTCStats()
+  if (rtc?.RTT) report.avgRttMs = Math.round(rtc.RTT)
+  const video = Object.values(client.getRemoteVideoStats() || {})[0]
+  if (video) {
+    report.packetLossPercent = Math.min(100, Math.max(0, Number(video.packetLossRate) || 0))
+    if (video.receiveBitrate) report.avgVideoKbps = Math.round(video.receiveBitrate / 1000)
+  }
+  return report
+}
+
 // Which way each plain (non-beauty) camera track is facing — Agora doesn't report it.
 const trackFacing = new WeakMap()
 

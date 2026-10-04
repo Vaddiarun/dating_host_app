@@ -502,7 +502,6 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
 
   const draw = () => {
     if (!running) return
-    raf = requestAnimationFrame(draw)
     const now = performance.now()
     if (now - lastFrameAt < FRAME_INTERVAL_MS) return // 60/120Hz screens: skip ticks with no new camera frame
     lastFrameAt = now
@@ -592,7 +591,24 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
       }
     }
   }
-  draw()
+  // The browser pauses requestAnimationFrame while the page is hidden (minimized window,
+  // another tab, app switched away). This canvas IS the video a call/broadcast sends, so with
+  // rAF alone the other side saw a frozen frame while audio carried on. While hidden, a Web
+  // Worker's timer (not paused or throttled the way page timers are) drives the frames instead.
+  const loop = () => {
+    if (!running) return
+    raf = requestAnimationFrame(loop)
+    draw()
+  }
+  const hiddenTicker = new Worker(URL.createObjectURL(new Blob(
+    ['let t = null; onmessage = (e) => { clearInterval(t); if (e.data > 0) t = setInterval(() => postMessage(0), e.data) }'],
+    { type: 'text/javascript' },
+  )))
+  hiddenTicker.onmessage = draw
+  const onVisibility = () => hiddenTicker.postMessage(document.hidden ? FRAME_INTERVAL_MS : 0)
+  document.addEventListener('visibilitychange', onVisibility)
+  onVisibility()
+  loop()
 
   const canvasStream = outputCanvas.captureStream(30)
   const videoTrack = canvasStream.getVideoTracks()[0]
@@ -665,6 +681,8 @@ export async function openBeautyCamera({ facingMode = 'user', settings, audio = 
     stop() {
       running = false
       cancelAnimationFrame(raf)
+      document.removeEventListener('visibilitychange', onVisibility)
+      hiddenTicker.terminate()
       rawStream.getTracks().forEach((t) => t.stop())
       videoTrack.stop()
       video.srcObject = null

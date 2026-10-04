@@ -79,6 +79,13 @@ export const calls = {
   get: (id) => apiFetch(`/calls/${id}`),
   end: (id) => apiFetch(`/calls/${id}/end`, { method: 'POST' }),
   rate: (id, stars) => apiFetch(`/calls/${id}/rating`, { method: 'POST', body: { stars } }),
+  // p2p calls only — relays WebRTC setup (hello/offer/answer/candidate) to the other participant.
+  signal: (id, data) => apiFetch(`/calls/${id}/signal`, { method: 'POST', body: { data } }),
+  // "auto" calls only — the direct connection failed; moves the call to Agora and returns
+  // this side's { channelName, mediaProvider: 'agora', agoraToken }.
+  mediaFallback: (id) => apiFetch(`/calls/${id}/media-fallback`, { method: 'POST' }),
+  // Once per call, when it ends — connection quality for the admin p2p-vs-Agora comparison.
+  mediaReport: (id, report) => apiFetch(`/calls/${id}/media-report`, { method: 'POST', body: report }),
 }
 
 export const chat = {
@@ -98,6 +105,8 @@ export const live = {
   get: (id) => apiFetch(`/live/broadcasts/${id}`),
   sendChat: (id, content) => apiFetch(`/live/broadcasts/${id}/chat`, { method: 'POST', body: { content } }),
   end: (id) => apiFetch(`/live/broadcasts/${id}/end`, { method: 'POST' }),
+  // "cloudflare" broadcasts only (lib/sfu.js): our offer for camera + mic -> the SFU's answer.
+  sfuPublish: (id, sdp, tracks) => apiFetch(`/live/broadcasts/${id}/sfu/publish`, { method: 'POST', body: { sdp, tracks } }),
 }
 
 export const withdrawals = {
