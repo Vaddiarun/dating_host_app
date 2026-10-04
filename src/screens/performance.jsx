@@ -7,6 +7,8 @@ import { useAuth } from '../state/AuthContext.jsx'
 import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 import { earnings as earningsApi, presence as presenceApi } from '../api/index.js'
 import { errorMessage } from '../lib/errors.js'
+import { TodayReportCard } from './dailyReport.jsx'
+import { Skel, SkelGroup, SkelHero, SkelCard } from '../ui/Skeleton.jsx'
 
 function Header({ name, isOnline }) {
   const nav = useNavigate()
@@ -24,7 +26,9 @@ function Header({ name, isOnline }) {
           <Icon name="bell" size={18} />
           {unreadCount > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 grid place-items-center rounded-full bg-rose-500 text-white text-[10px]">{unreadCount}</span>}
         </button>
-        <Avatar name={name} size={40} ring="rgba(255,255,255,.8)" className="shrink-0" />
+        <button onClick={() => nav('/settings')} className="shrink-0 rounded-full active:scale-95 transition" aria-label="Profile & settings">
+          <Avatar name={name} size={40} ring="rgba(255,255,255,.8)" />
+        </button>
       </div>
     </div>
   )
@@ -208,18 +212,21 @@ export default function Performance() {
   }
 
   return (
-    <AppLayout title="Performance" back maxW="lg" bg="white" pad={false}>
+    <AppLayout title="Performance" back maxW="xl" bg="white" pad={false}>
       <div className="lg:hidden">
         <Header name={name} isOnline={isOnline} />
         {loading ? (
-          <div className="px-5 pt-4 pb-24 space-y-4 animate-pulse">
-            <div className="h-16 rounded-2xl bg-black/[.06]" />
-            <div className="h-48 rounded-2xl bg-black/[.06]" />
-          </div>
+          <SkelGroup className="px-5 pt-4 pb-24 space-y-4">
+            <div className="card p-4 flex items-center gap-3"><Skel className="h-11 w-11 rounded-xl" /><div className="flex-1 space-y-2"><Skel className="h-3.5 w-1/3 rounded-md" /><Skel className="h-2.5 w-1/2 rounded-md" /></div><Skel className="h-7 w-12 rounded-full" /></div>
+            <SkelHero height="h-44" className="rounded-3xl" />
+            <Skel className="h-16 rounded-2xl" />
+            <SkelCard lines={3} />
+          </SkelGroup>
         ) : (
           <div className="px-5 pt-4 pb-24 space-y-4">
             <ErrorCard message={err} onRetry={load} compact />
             <PresenceCard isOnline={isOnline} toggling={toggling} onToggle={toggleOnline} />
+            <TodayReportCard />
             <InviteBanner />
             <PerformanceMeter />
             <LivestreamScore />
@@ -231,9 +238,11 @@ export default function Performance() {
       </div>
 
       {/* desktop — same content, no phone-style chrome */}
-      <div className="hidden lg:block px-8 py-8 max-w-2xl">
+      <div className="hidden lg:block px-8 py-8 max-w-5xl mx-auto">
         <div className="flex items-center gap-3 mb-6">
-          <Avatar name={name} size={48} ring="#6d3be6" />
+          <button onClick={() => nav('/settings')} className="rounded-full hover:opacity-90 transition" aria-label="Profile & settings">
+            <Avatar name={name} size={48} ring="#6d3be6" />
+          </button>
           <div>
             <p className="text-[20px] font-extrabold text-ink-900">Hi, {name}</p>
             <p className="text-[13px] text-ink-400">{isOnline ? "You're online" : "You're offline"}</p>
@@ -243,6 +252,7 @@ export default function Performance() {
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-4">
             <PresenceCard isOnline={isOnline} toggling={toggling} onToggle={toggleOnline} />
+            <TodayReportCard />
             <InviteBanner />
             <HelpVideosRow />
             <LeaderboardLinks />

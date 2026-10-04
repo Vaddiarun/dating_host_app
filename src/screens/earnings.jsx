@@ -4,8 +4,9 @@ import Icon from '../ui/Icon.jsx'
 import { PlainHeader, TopBar, Segmented, IconBadge, SectionTitle, ErrorCard } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { earnings as earningsApi } from '../api/index.js'
-import { rupees, clockTime, dayLabel, beans as beansFmt } from '../lib/format.js'
+import { rupees, clockTime, dayLabel, beans as beansFmt, isoDate } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
+import { Skel, SkelGroup, SkelHero, SkelStats, SkelList, SkelCard } from '../ui/Skeleton.jsx'
 
 /* 25 — Earnings */
 export function Earnings() {
@@ -31,7 +32,14 @@ export function Earnings() {
     <AppLayout tab="/earnings" title="Earnings" maxW="xl" bg="canvas">
       <PlainHeader title="Earnings" right={<button onClick={() => nav('/earnings/statement')} className="h-10 w-10 grid place-items-center rounded-xl border border-black/10 text-ink-700"><Icon name="download" size={18} /></button>} />
       {loading ? (
-        <div className="px-5 lg:px-0 pt-4 pb-4 animate-pulse space-y-4"><div className="h-32 rounded-2xl bg-black/[.06]" /></div>
+        <SkelGroup className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4 grid gap-4 lg:grid-cols-[1fr_320px] lg:items-start">
+          <div className="space-y-4">
+            <SkelHero />
+            <SkelStats count={3} />
+            <div className="card p-4 flex items-end gap-2 h-44">{[55, 35, 8, 70, 85, 60, 90].map((h, i) => <Skel key={i} className="flex-1 rounded-md" style={{ height: `${h}%` }} />)}</div>
+          </div>
+          <div className="space-y-3">{[0, 1, 2, 3, 4].map((i) => <Skel key={i} className="h-12 rounded-2xl" />)}</div>
+        </SkelGroup>
       ) : err ? (
         <ErrorCard message={err} onRetry={load} className="px-5 lg:px-0" />
       ) : (
@@ -54,7 +62,7 @@ export function Earnings() {
                 <div className="flex items-end justify-between gap-2 h-40 lg:h-52">
                   {week.map((d, i) => (
                     <div key={i} className="flex-1 h-full flex flex-col items-center justify-end gap-1.5">
-                      <span className="text-[10px] font-bold text-brand-600">{rupees(d.paise)}</span>
+                      <span className="text-[10px] font-bold text-brand-600 whitespace-nowrap">{rupees(d.paise).replace('₹ ', '₹')}</span>
                       <div className="w-full rounded-md bg-brand-500 min-h-[4px]" style={{ height: `${Math.max((d.paise / maxPaise) * 78, 2)}%` }} />
                       <span className="text-[10px] text-ink-400 shrink-0">{d.label}</span>
                     </div>
@@ -66,6 +74,7 @@ export function Earnings() {
 
           <div className="space-y-3">
             <button onClick={() => nav('/withdraw')} className="btn-gold"><Icon name="wallet" size={17} /> Withdraw {rupees(summary?.availableBalancePaise)}</button>
+            <button onClick={() => nav('/earnings/daily')} className="btn-outline"><Icon name="calendar" size={16} /> Daily report</button>
             <button onClick={() => nav('/earnings/breakdown')} className="btn-outline">Breakdown</button>
             <button onClick={() => nav('/earnings/history')} className="btn-outline">History</button>
             <button onClick={() => nav('/earnings/statement')} className="btn-outline">Statement</button>
@@ -92,12 +101,27 @@ export function Breakdown() {
   ]
   const gross = b?.grossEarningsPaise || 1
 
+  if (!b && !err) {
+    return (
+      <AppLayout tab="/earnings" title="Breakdown" back bottomNav={false} maxW="lg" bg="canvas">
+        <TopBar title="Breakdown" sub="This month" />
+        <SkelGroup className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 space-y-4 lg:space-y-0 lg:grid lg:grid-cols-2 lg:gap-6">
+          <Skel className="h-16 rounded-2xl lg:col-span-2" />
+          <SkelCard lines={4} />
+          <SkelCard lines={3} />
+        </SkelGroup>
+      </AppLayout>
+    )
+  }
+
   return (
-    <AppLayout tab="/earnings" title="Breakdown" back bottomNav={false} maxW="md" bg="canvas">
+    <AppLayout tab="/earnings" title="Breakdown" back bottomNav={false} maxW="lg" bg="canvas">
       <TopBar title="Breakdown" sub="This month" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6">
-        <ErrorCard message={err} onRetry={load} className="mb-3" />
-        <div className="card p-4 flex items-center justify-between"><span className="text-[14px] text-ink-500">Gross earnings</span><span className="text-[20px] font-extrabold text-gold-500">{rupees(b?.grossEarningsPaise)}</span></div>
+      {/* Laptop: gross across the top, sources and deductions side by side. */}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 lg:grid lg:grid-cols-2 lg:gap-x-6 lg:items-start">
+        <ErrorCard message={err} onRetry={load} className="mb-3 lg:col-span-2" />
+        <div className="card p-4 flex items-center justify-between lg:col-span-2"><span className="text-[14px] text-ink-500">Gross earnings</span><span className="text-[20px] font-extrabold text-gold-500">{rupees(b?.grossEarningsPaise)}</span></div>
+        <div>
         <SectionTitle className="mt-5 mb-2">By source</SectionTitle>
         <div className="card p-4 space-y-3.5">
           {sources.map(([l, v, c]) => (
@@ -107,11 +131,14 @@ export function Breakdown() {
             </div>
           ))}
         </div>
+        </div>
+        <div>
         <SectionTitle className="mt-5 mb-2">Deductions</SectionTitle>
         <div className="card p-4 text-[14px]">
           <div className="flex justify-between py-1.5"><span className="text-ink-500">Platform commission</span><span className="font-semibold text-rose-500">– {rupees(b?.deductions?.platformCommissionPaise)}</span></div>
           <div className="flex justify-between py-1.5"><span className="text-ink-500">TDS</span><span className="font-semibold text-rose-500">– {rupees(b?.deductions?.tdsPaise)}</span></div>
           <div className="flex justify-between pt-2 mt-1 border-t border-black/5"><span className="font-bold text-ink-900">Net payable</span><span className="font-extrabold text-gold-500">{rupees(b?.netPayablePaise)}</span></div>
+        </div>
         </div>
       </div>
     </AppLayout>
@@ -147,11 +174,13 @@ export function EarningsHistory() {
   }
 
   return (
-    <AppLayout tab="/earnings" title="History" back bottomNav={false} maxW="lg" bg="canvas">
+    <AppLayout tab="/earnings" title="History" back bottomNav={false} maxW="xl" bg="canvas">
       <TopBar title="History" right={<button className="h-9 w-9 grid place-items-center rounded-xl border border-black/10 text-ink-700"><Icon name="search" size={17} /></button>} />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6">
+      {/* Laptop: list on the left, a summary of what's listed in a sticky right rail. */}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 lg:grid lg:grid-cols-[1fr_300px] lg:gap-x-6 lg:items-start">
+        <div>
         <Segmented options={['All', 'Calls', 'Gifts', 'Live']} value={f} onChange={setF} />
-        {loading && <p className="text-[13px] text-ink-400 mt-6 text-center">Loading…</p>}
+        {loading && <SkelGroup><SkelList rows={6} avatar="square" title /></SkelGroup>}
         {!loading && err && <ErrorCard message={err} onRetry={load} className="mt-6" />}
         {!loading && !err && items.length === 0 && <p className="text-[13px] text-ink-400 mt-6 text-center">Nothing here yet.</p>}
         {!err && Object.entries(groups).map(([day, list]) => (
@@ -168,6 +197,28 @@ export function EarningsHistory() {
             </div>
           </div>
         ))}
+        </div>
+        <aside className="hidden lg:block lg:sticky lg:top-6 space-y-3">
+          {loading ? <SkelGroup className="space-y-3"><SkelCard lines={2} /><SkelCard lines={3} header={false} /></SkelGroup> : <>
+          <div className="card p-4">
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-ink-400">{f === 'All' ? 'Everything listed' : f}</p>
+            <p className="text-[26px] font-extrabold text-emerald-600 mt-1">+ {rupees(items.reduce((a, it) => a + (it.amountPaise || 0), 0))}</p>
+            <p className="text-[12px] text-ink-400">{items.length} {items.length === 1 ? 'entry' : 'entries'}</p>
+          </div>
+          <div className="card p-4 space-y-3">
+            {[['phone', 'Calls', 'brand', (it) => it.type !== 'gift' && it.type !== 'live'], ['gift', 'Gifts', 'gold', (it) => it.type === 'gift'], ['live', 'Live', 'rose', (it) => it.type === 'live']].map(([icon, label, tone, match]) => {
+              const list = items.filter(match)
+              return (
+                <div key={label} className="flex items-center gap-3">
+                  <IconBadge name={icon} tone={tone} size={34} />
+                  <span className="flex-1 text-[13px] font-semibold text-ink-900">{label}<span className="block text-[11px] font-medium text-ink-400">{list.length} {list.length === 1 ? 'entry' : 'entries'}</span></span>
+                  <span className="text-[13px] font-bold text-ink-900">{rupees(list.reduce((a, it) => a + (it.amountPaise || 0), 0))}</span>
+                </div>
+              )
+            })}
+          </div>
+          </>}
+        </aside>
       </div>
     </AppLayout>
   )
@@ -175,7 +226,6 @@ export function EarningsHistory() {
 
 /* 28 — Statement */
 // yyyy-mm-dd in local time (not toISOString, which shifts to UTC and can land on the wrong day)
-const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 export function Statement() {
   const today = new Date()
@@ -198,19 +248,22 @@ export function Statement() {
   }
 
   return (
-    <AppLayout tab="/earnings" title="Statement" back bottomNav={false} maxW="md" bg="canvas">
+    <AppLayout tab="/earnings" title="Statement" back bottomNav={false} maxW="lg" bg="canvas">
       <TopBar title="Statement" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
-        <div className="card p-4 flex items-center gap-3">
+      {/* Laptop: what it is on the left, the date range + download in a card on the right. */}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
+        <div className="card p-4 flex items-center gap-3 lg:p-6">
           <IconBadge name="file-text" tone="brand" />
           <div><p className="text-[15px] font-semibold text-ink-900">Earnings statement</p><p className="text-[12px] text-ink-400">Exported as a CSV file</p></div>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="lg:card lg:p-5">
+        <div className="mt-4 lg:mt-0 grid grid-cols-2 gap-3">
           <div><span className="label">From</span><input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} max={to} /></div>
           <div><span className="label">To</span><input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} min={from} max={isoDate(today)} /></div>
         </div>
         <ErrorCard message={err} onRetry={download} compact className="mt-3" />
         <button onClick={download} disabled={busy} className="btn-primary mt-4 disabled:opacity-60"><Icon name="download" size={16} /> {busy ? 'Preparing…' : 'Download CSV'}</button>
+        </div>
       </div>
     </AppLayout>
   )

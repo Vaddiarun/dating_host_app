@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
+import logoUrl from '../assets/logo.png'
 import { StatusBar, TopBar, PlainHeader, IconBadge, ResultScreen, SectionTitle, ErrorCard, ReferenceRow } from '../ui/kit.jsx'
 import { CenterLayout, ImmersiveLayout, AppLayout } from '../ui/layouts.jsx'
 import { useAuth, resolveEntryRoute } from '../state/AuthContext.jsx'
@@ -9,6 +10,7 @@ import { errorMessage } from '../lib/errors.js'
 import { referenceCode } from '../lib/format.js'
 import { getBeautySettings, openBeautyCamera } from '../lib/beautyFilter.js'
 import { uploadAvatar } from '../lib/avatar.js'
+import { Skel } from '../ui/Skeleton.jsx'
 
 /* 1 — Splash */
 export function Splash() {
@@ -36,9 +38,7 @@ export function Splash() {
             <span className="pointer-events-none absolute -inset-6 rounded-[40px] bg-brand-400/30 blur-2xl animate-glow-breathe" />
             {/* pulsing rings */}
             <span className="pointer-events-none absolute inset-0 rounded-[26px] ring-1 ring-white/20 animate-pulse-ring" />
-            <div className="relative h-24 w-24 rounded-[26px] bg-gradient-to-br from-brand-300 via-brand-500 to-brand-700 shadow-[0_20px_60px_-10px_rgba(109,59,230,.8)] animate-logo-in grid place-items-center">
-              <Icon name="heart" size={34} className="text-white/90" fill="currentColor" />
-            </div>
+            <img src={logoUrl} alt="Splash" className="relative h-24 w-24 drop-shadow-[0_20px_40px_rgba(109,59,230,.6)] animate-logo-in" />
           </div>
           <h1 className="text-[30px] font-extrabold animate-word-in">Splash</h1>
         </div>
@@ -58,7 +58,7 @@ export function Splash() {
 export function Login() {
   const nav = useNavigate()
   const { requestOtp } = useAuth()
-  const [num, setNum] = useState('98765 43210')
+  const [num, setNum] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
@@ -83,13 +83,22 @@ export function Login() {
       <StatusBar />
       <div className="flex-1 px-6 pt-6 lg:pt-10 pb-8">
         <div className="mx-auto h-28 w-28 rounded-[28px] bg-gradient-to-br from-brand-50 to-gold-50 grid place-items-center">
-          <div className="h-16 w-14 rounded-2xl border-2 border-brand-500/60 grid place-items-center"><Icon name="heart" size={26} className="text-gold-400" /></div>
+          <img src={logoUrl} alt="Splash" className="h-20 w-20" />
         </div>
         <h1 className="mt-7 text-[26px] font-extrabold text-ink-900">Your number</h1>
         <p className="text-[14px] text-ink-400 mt-1">We'll text a 6-digit code to verify it's you.</p>
         <div className="mt-6 flex gap-2">
           <div className="input w-[86px] flex items-center justify-center gap-1 font-semibold">🇮🇳 +91</div>
-          <input value={num} onChange={(e) => setNum(e.target.value)} className="input flex-1" inputMode="numeric" />
+          <input
+            value={num}
+            onChange={(e) => { setNum(e.target.value.replace(/\D/g, '').slice(0, 10)); setErr('') }}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+            placeholder="98765 43210"
+            className="input flex-1"
+            inputMode="numeric"
+            autoComplete="tel-national"
+            maxLength={10}
+          />
         </div>
         <ErrorCard message={err} compact className="mt-2" />
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-black/[.03] px-3 py-2.5 text-[12px] text-ink-400">
@@ -342,6 +351,7 @@ export function GallerySetup() {
           <button onClick={() => fileRef.current?.click()} disabled={uploading} className="aspect-square rounded-2xl border-2 border-dashed border-brand-300 bg-brand-50/60 grid place-items-center text-brand-500 disabled:opacity-60">
             {uploading ? <Icon name="refresh" size={20} className="animate-spinslow" /> : <Icon name="plus" size={22} />}
           </button>
+          {loading && [0, 1, 2].map((i) => <Skel key={i} className="aspect-square rounded-2xl" />)}
           {!loading && items.map((t) => (
             <div key={t.id} className="group relative aspect-square rounded-2xl overflow-hidden bg-black/5">
               {t.mediaType === 'video' ? (

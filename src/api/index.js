@@ -79,6 +79,11 @@ export const calls = {
   get: (id) => apiFetch(`/calls/${id}`),
   end: (id) => apiFetch(`/calls/${id}/end`, { method: 'POST' }),
   rate: (id, stars) => apiFetch(`/calls/${id}/rating`, { method: 'POST', body: { stars } }),
+  // Paginated call history, newest first. filter: all | video | voice | missed.
+  // Returns { calls, total, page, pageSize, hasMore, summary: { totalCalls, earnedPaise } }.
+  // date/tz: the calendar day to show (requested from the backend; until it filters by date,
+  // the Calls screen pages through and keeps only that day's calls itself).
+  list: (filter = 'all', page = 1, pageSize = 20, date, tz) => apiFetch('/me/calls', { query: { filter, page, pageSize, date, tz } }),
   // p2p calls only — relays WebRTC setup (hello/offer/answer/candidate) to the other participant.
   signal: (id, data) => apiFetch(`/calls/${id}/signal`, { method: 'POST', body: { data } }),
   // "auto" calls only — the direct connection failed; moves the call to Agora and returns
@@ -97,7 +102,8 @@ export const chat = {
 
 export const gifts = {
   catalog: () => apiFetch('/gifts'),
-  request: (userId, suggestedGiftId) => apiFetch('/gifts/request', { method: 'POST', body: { userId, suggestedGiftId } }),
+  // note: optional, up to 140 chars — delivered to the user in gift:requested
+  request: (userId, suggestedGiftId, note) => apiFetch('/gifts/request', { method: 'POST', body: { userId, suggestedGiftId, ...(note ? { note } : {}) } }),
 }
 
 export const live = {
@@ -121,6 +127,17 @@ export const earnings = {
   breakdown: (from, to) => apiFetch('/me/earnings/breakdown', { query: { from, to } }),
   history: (type = 'all', page = 1, pageSize = 20) => apiFetch('/me/history', { query: { type, page, pageSize } }),
   downloadStatement: (from, to) => apiDownload('/me/earnings/statement', { query: { from, to }, filename: `statement-${from || 'current'}.csv` }),
+}
+
+/**
+ * Per-day host stats — online time and earnings split by source for one calendar day, and a
+ * compact per-day series for charts. NOT built on the backend yet (requested alongside the
+ * Daily report screen); until it exists these 404 and the screen falls back to the endpoints
+ * above. Dates are the host's local calendar day (YYYY-MM-DD) in `tz`.
+ */
+export const stats = {
+  daily: (date, tz) => apiFetch('/me/stats/daily', { query: { date, tz } }),
+  range: (from, to, tz) => apiFetch('/me/stats/daily-summary', { query: { from, to, tz } }),
 }
 
 export const notifications = {

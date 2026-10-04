@@ -12,21 +12,58 @@ const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmark
 const MAX_FACES = 2 // calls/broadcasts are one person on camera; each extra face costs inference time
 
 let landmarkerPromise = null
+let landmarker = null // the resolved instance, so a crashed one can be closed and replaced
+
+async function createLandmarker(delegate) {
+  const { FaceLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision')
+  const vision = await FilesetResolver.forVisionTasks(WASM_BASE)
+  return FaceLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: MODEL_URL, delegate },
+    runningMode: 'VIDEO',
+    numFaces: MAX_FACES,
+    outputFaceBlendshapes: false,
+    outputFacialTransformationMatrixes: false,
+  })
+}
+
 async function getLandmarker() {
   if (!landmarkerPromise) {
     landmarkerPromise = (async () => {
-      const { FaceLandmarker, FilesetResolver } = await import('@mediapipe/tasks-vision')
-      const vision = await FilesetResolver.forVisionTasks(WASM_BASE)
-      return FaceLandmarker.createFromOptions(vision, {
-        baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
-        runningMode: 'VIDEO',
-        numFaces: MAX_FACES,
-        outputFaceBlendshapes: false,
-        outputFacialTransformationMatrixes: false,
-      })
-    })().catch((e) => { landmarkerPromise = null; throw e })
+      // GPU delegate first; some drivers / WebViews refuse it outright, and CPU is still fast
+      // enough at ~12 detections/s, so fall back instead of failing.
+      try {
+        landmarker = await createLandmarker('GPU')
+      } catch {
+        landmarker = await createLandmarker('CPU')
+      }
+      return landmarker
+    })().catch((e) => { landmarkerPromise = null; landmarker = null; throw e })
   }
   return landmarkerPromise
+}
+
+/** Throws away the current landmarker so the next detectFaces() builds a fresh one. After a
+ * WASM-side exception the old instance is often left in a broken state where every later call
+ * throws too — which is how one bad frame used to kill face detection for the whole session. */
+export function resetFaceLandmarker() {
+  const old = landmarker
+  landmarker = null
+  landmarkerPromise = null
+  lastTimestamp = -1
+  try { old?.close() } catch { /* already dead */ }
+}
+
+let lastTimestamp = -1
+
+/** True when the element has a decoded frame with real dimensions. MediaPipe aborts on a 0x0
+ * frame (camera still starting, mid camera-switch, track ended, tab backgrounded), so frames
+ * like that must never reach detectForVideo. */
+export function hasUsableFrame(source) {
+  if (!source) return false
+  if (typeof HTMLVideoElement !== 'undefined' && source instanceof HTMLVideoElement) {
+    return source.readyState >= 2 && source.videoWidth > 0 && source.videoHeight > 0 && !source.ended
+  }
+  return (source.width || 0) > 0 && (source.height || 0) > 0
 }
 
 // Standard MediaPipe FaceMesh point-index groups (stable across the ecosystem) — geometry
@@ -45,11 +82,25 @@ const LEFT_EYE_CORNERS = [33, 133]
 const RIGHT_EYE_CORNERS = [263, 362]
 
 /** Detects up to a few faces in the given video element for the given timestamp (ms).
- * Returns an array of landmark sets (each 468/478 normalized x/y points), possibly empty. */
+ * Returns an array of landmark sets (each 468/478 normalized x/y points), possibly empty.
+ *
+ * Never lets an empty frame reach MediaPipe (returns [] instead), keeps timestamps strictly
+ * increasing (VIDEO mode rejects repeats), and if MediaPipe still throws, discards the
+ * landmarker so the next call starts clean — the error is rethrown so the caller can back off,
+ * but detection is never left permanently dead. */
 export async function detectFaces(video, timestampMs) {
-  const landmarker = await getLandmarker()
-  const result = landmarker.detectForVideo(video, timestampMs)
-  return result?.faceLandmarks || []
+  if (!hasUsableFrame(video)) return []
+  const lm = await getLandmarker()
+  if (!hasUsableFrame(video)) return [] // the camera may have stopped/switched while the model loaded
+  const ts = Math.max(Math.round(timestampMs), lastTimestamp + 1)
+  lastTimestamp = ts
+  try {
+    const result = lm.detectForVideo(video, ts)
+    return result?.faceLandmarks || []
+  } catch (e) {
+    resetFaceLandmarker()
+    throw e
+  }
 }
 
 function loopToPath(path, landmarks, indices, width, height) {

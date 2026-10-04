@@ -7,7 +7,7 @@ import { EmojiPicker, insertAtCaret } from '../ui/EmojiPicker.jsx'
 import { FloatingComments, recentComments } from '../ui/FloatingComments.jsx'
 import { GiftRequestSheet } from './misc.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
-import { calls as callsApi, earnings as earningsApi, chat as chatApi, profile as profileApi } from '../api/index.js'
+import { calls as callsApi, chat as chatApi, profile as profileApi } from '../api/index.js'
 import { rupees, clockTime, dayLabel } from '../lib/format.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera, getAgoraCallStats } from '../lib/agora.js'
 import { joinP2P } from '../lib/p2p.js'
@@ -16,6 +16,7 @@ import { useAuth } from '../state/AuthContext.jsx'
 import { errorMessage } from '../lib/errors.js'
 import { playRingtone } from '../lib/sound.js'
 import { onSocketEvent } from '../lib/socket.js'
+import { Skel, SkelGroup, SkelList, SkelResult } from '../ui/Skeleton.jsx'
 
 /** 'voice' | 'video' | null (unknown) for a call-ish object or raw type string. The user app
  * creates calls with `type: 'voice' | 'video'` (POST /calls); history rows expose it as
@@ -28,69 +29,166 @@ function callKind(src) {
 }
 
 /* 15 — Calls list */
+const CALL_FILTERS = { All: 'all', Video: 'video', Voice: 'voice', Missed: 'missed' }
+// Backend call statuses: ringing | ongoing | completed | missed | rejected. `failed` exists in
+// the database but is never set — treated as missed just in case.
+const LIVE_STATUSES = ['ringing', 'ongoing']
+const MISSED_STATUSES = ['missed', 'failed']
+// Call-length rating from the backend (durationQuality): under 4 min = bad, 4–10 min = good,
+// over 10 min = excellent; null for missed / rejected / live calls (no badge then).
+const QUALITY = {
+  bad: { label: 'Bad', cls: 'bg-rose-50 text-rose-500' },
+  good: { label: 'Good', cls: 'bg-emerald-50 text-emerald-600' },
+  excellent: { label: 'Excellent', cls: 'bg-gold-50 text-gold-600', star: true },
+}
+
+function QualityPill({ q, size = 'sm' }) {
+  const meta = QUALITY[q]
+  if (!meta) return null
+  const big = size === 'lg'
+  return (
+    <span title="Call length rating" className={`inline-flex items-center gap-1 rounded-full font-semibold shrink-0 ${meta.cls} ${big ? 'px-2.5 py-1 text-[12px]' : 'px-1.5 py-px text-[10.5px]'}`}>
+      {meta.star && <Icon name="star" size={big ? 12 : 10} fill="currentColor" />}{meta.label}
+    </span>
+  )
+}
+
+// Extra context for a completed call, from endReason (normal hang-ups get no note).
+const END_NOTES = { insufficient_balance: 'wallet ran out', reaped_stale_ongoing: 'connection lost' }
+
+/** "12 min 5 sec" / "45 sec" — call length for the list row. */
+function callLength(sec) {
+  if (!sec) return ''
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return m ? `${m} min${s ? ` ${s} sec` : ''}` : `${s} sec`
+}
+
 export function CallsList() {
   const nav = useNavigate()
   const [f, setF] = useState('All')
   const [items, setItems] = useState([])
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
+  const [summary, setSummary] = useState(null) // { totalCalls, earnedPaise } — whole filter, not just loaded pages
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [err, setErr] = useState('')
+  const [moreErr, setMoreErr] = useState('')
+  const reqRef = useRef(0)
+  const sentinelRef = useRef(null)
 
-  const load = () => {
-    setLoading(true)
-    setErr('')
-    earningsApi.history('calls', 1, 50)
-      .then((res) => setItems(res.items || []))
-      .catch((e) => setErr(errorMessage(e, 'Could not load your calls.')))
-      .finally(() => setLoading(false))
+  // Page 1 replaces the list (new tab / retry); later pages append. The filter is applied by
+  // the server, so "Missed" covers every call, not just the ones already loaded.
+  const load = (pageNo = 1) => {
+    const req = ++reqRef.current
+    if (pageNo === 1) { setLoading(true); setErr('') } else { setLoadingMore(true); setMoreErr('') }
+    callsApi.list(CALL_FILTERS[f], pageNo, 20)
+      .then((res) => {
+        if (req !== reqRef.current) return // a newer tab/page request superseded this one
+        const list = res.calls || []
+        setItems((prev) => (pageNo === 1 ? list : [...prev, ...list]))
+        setPage(pageNo)
+        setHasMore(!!res.hasMore)
+        // summary covers every call matching the filter; fall back to `total` if it's absent
+        if (res.summary) setSummary(res.summary)
+        else if (pageNo === 1) setSummary({ totalCalls: res.total ?? null, earnedPaise: null })
+      })
+      .catch((e) => {
+        if (req !== reqRef.current) return
+        if (pageNo === 1) setErr(errorMessage(e, 'Could not load your calls.'))
+        else setMoreErr(errorMessage(e, 'Could not load more calls.'))
+      })
+      .finally(() => {
+        if (req !== reqRef.current) return
+        setLoading(false)
+        setLoadingMore(false)
+      })
   }
-  useEffect(load, [])
+  useEffect(() => { load(1) }, [f]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = items.filter((c) => {
-    if (f === 'All') return true
-    if (f === 'Video') return c.callType === 'video'
-    if (f === 'Voice') return c.callType === 'voice'
-    if (f === 'Missed') return c.status === 'missed' || c.status === 'no_answer'
-    return true
-  })
+  // Load the next page automatically when the end of the list scrolls into view.
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || !hasMore || loading || loadingMore || moreErr) return
+    const io = new IntersectionObserver((entries) => { if (entries[0].isIntersecting) load(page + 1) }, { rootMargin: '300px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [hasMore, loading, loadingMore, moreErr, page]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const groups = filtered.reduce((acc, c) => {
-    const day = dayLabel(c.when)
+  const groups = items.reduce((acc, c) => {
+    const day = dayLabel(c.startedAt || c.createdAt)
     ;(acc[day] ||= []).push(c)
     return acc
   }, {})
 
-  const totalEarned = items.reduce((sum, c) => sum + (c.amountPaise || 0), 0)
+  const totalCalls = summary?.totalCalls ?? items.length
+  // Earned = host's share after commission (same as the dashboard), not what the user paid.
+  const totalEarned = summary?.earnedPaise ?? items.reduce((sum, c) => sum + (c.earnedPaise || 0), 0)
 
   return (
-    <AppLayout tab="/calls" title="Calls" maxW="lg" bg="canvas">
+    <AppLayout tab="/calls" title="Calls" maxW="xl" bg="canvas">
       <PlainHeader title="Calls" sub="Recent calls" right={<button className="h-10 w-10 grid place-items-center rounded-xl border border-black/10 text-ink-700"><Icon name="search" size={18} /></button>} />
-      <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4">
-        <Segmented options={['All', 'Video', 'Voice', 'Missed']} value={f} onChange={setF} />
-        <div className="grid grid-cols-3 gap-3 mt-4">
-          {[['phone', String(items.length), 'Calls'], ['wallet', rupees(totalEarned), 'Earned']].map(([i, v, l]) => (
-            <div key={l} className="card p-3.5"><Icon name={i} size={16} className="text-brand-600" /><p className="text-[18px] font-extrabold text-ink-900 mt-0.5">{v}</p><p className="text-[12px] text-ink-400">{l}</p></div>
+      {/* Laptop: filters + list on the left, the summary cards in a sticky right rail. */}
+      <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4 lg:grid lg:grid-cols-[1fr_300px] lg:gap-x-6 lg:items-start">
+        <div className="lg:col-start-1"><Segmented options={['All', 'Video', 'Voice', 'Missed']} value={f} onChange={setF} /></div>
+        <div className="grid grid-cols-3 gap-3 mt-4 lg:mt-0 lg:grid-cols-1 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:sticky lg:top-6">
+          {[['phone', String(totalCalls), f === 'All' ? 'Calls' : `${f} calls`], ['wallet', rupees(totalEarned), 'Earned']].map(([i, v, l]) => (
+            <div key={i} className="card p-3.5"><Icon name={i} size={16} className="text-brand-600" />{loading ? <Skel className="h-5 w-14 rounded-md my-1" /> : <p className="text-[18px] font-extrabold text-ink-900 mt-0.5">{v}</p>}<p className="text-[12px] text-ink-400">{l}</p></div>
           ))}
         </div>
-        {loading && <p className="text-[13px] text-ink-400 mt-6 text-center">Loading…</p>}
-        {!loading && err && <ErrorCard message={err} onRetry={load} className="mt-6" />}
-        {!loading && !err && filtered.length === 0 && <p className="text-[13px] text-ink-400 mt-6 text-center">No calls yet.</p>}
-        {!err && Object.entries(groups).map(([day, list]) => (
+        <div className="lg:col-start-1">
+        {loading && <SkelGroup><SkelList rows={6} title /></SkelGroup>}
+        {!loading && err && <ErrorCard message={err} onRetry={() => load(1)} className="mt-6" />}
+        {!loading && !err && items.length === 0 && <p className="text-[13px] text-ink-400 mt-6 text-center">{f === 'Missed' ? 'No missed calls.' : 'No calls yet.'}</p>}
+        {!loading && !err && Object.entries(groups).map(([day, list]) => (
           <div key={day}>
             <SectionTitle className="mt-5 mb-1">{day}</SectionTitle>
             <div className="card px-4 lg:px-4 divide-y divide-black/5">
-              {list.map((c) => (
-                <button key={c.id} onClick={() => nav(`/call/summary?callId=${c.id}`)} className="w-full flex items-center gap-3 py-3 text-left">
-                  <Avatar name="Caller" size={40} />
-                  <div className="flex-1"><p className="text-[15px] font-semibold text-ink-900">{c.callType === 'voice' ? 'Voice call' : 'Video call'}</p><p className="text-[12px] text-ink-400 capitalize">{c.status}</p></div>
-                  <div className="text-right">
-                    {c.status === 'missed' || c.status === 'no_answer' ? <span className="pill bg-rose-50 text-rose-500 text-[11px]">Missed</span> : <p className="text-[14px] font-bold text-emerald-600">+ {rupees(c.amountPaise)}</p>}
-                    <p className="text-[11px] text-ink-300 mt-0.5">{clockTime(c.when)}</p>
-                  </div>
-                </button>
-              ))}
+              {list.map((c) => {
+                const live = LIVE_STATUSES.includes(c.status)
+                const missed = MISSED_STATUSES.includes(c.status)
+                const cancelled = missed && c.endReason === 'cancelled_by_caller' // user hung up before the host answered
+                const declined = c.status === 'rejected'
+                const kind = c.type === 'voice' ? 'Voice call' : 'Video call'
+                const note = c.status === 'completed' && END_NOTES[c.endReason]
+                return (
+                  // A live call has no summary yet — not tappable until it ends.
+                  <button key={c.id} disabled={live} onClick={() => nav(`/call/summary?callId=${c.id}`)} className="w-full flex items-center gap-3 py-3 text-left disabled:cursor-default">
+                    <Avatar name={c.callerName || 'Caller'} size={40} />
+                    <div className="flex-1 min-w-0">
+                      <p className="flex items-center gap-1.5 min-w-0"><span className="text-[15px] font-semibold text-ink-900 truncate">{c.callerName || 'Caller'}</span><QualityPill q={c.durationQuality} /></p>
+                      <p className="text-[12px] text-ink-400 flex items-center gap-1 min-w-0">
+                        <Icon name={c.type === 'voice' ? 'phone' : 'video'} size={11} className="shrink-0" /> <span className="truncate">{kind}{c.status === 'completed' && c.durationSeconds ? ` · ${callLength(c.durationSeconds)}` : ''}</span>
+                      </p>
+                      {note && <p className="text-[11px] font-medium text-gold-600 mt-0.5 first-letter:uppercase">{note}</p>}
+                    </div>
+                    <div className="text-right shrink-0">
+                      {live ? <span className="pill bg-emerald-50 text-emerald-600 text-[11px]"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live now</span>
+                        : cancelled ? <span className="pill bg-black/5 text-ink-500 text-[11px]">Cancelled</span>
+                        : missed ? <span className="pill bg-rose-50 text-rose-500 text-[11px]">Missed</span>
+                        : declined ? <span className="pill bg-black/5 text-ink-500 text-[11px]">Declined</span>
+                        : <p className="text-[14px] font-bold text-emerald-600">+ {rupees(c.earnedPaise)}</p>}
+                      <p className="text-[11px] text-ink-300 mt-0.5">{clockTime(c.startedAt || c.createdAt)}</p>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </div>
         ))}
+        {/* pagination: auto-loads near the end; the button is the fallback */}
+        {!loading && !err && hasMore && (
+          <div ref={sentinelRef} className="mt-4">
+            {loadingMore ? <SkelGroup><SkelList rows={2} /></SkelGroup> : (
+              <>
+                {moreErr && <ErrorCard message={moreErr} compact className="mb-3" />}
+                <button onClick={() => load(page + 1)} className="btn-outline text-[13px]">{moreErr ? 'Try again' : 'Load more'}</button>
+              </>
+            )}
+          </div>
+        )}
+        </div>
       </div>
     </AppLayout>
   )
@@ -235,7 +333,26 @@ export function Connecting() {
 /* In-call chat drawer — a compact version of the Thread component in chat.jsx (same
  * send/receive API), not the full conversation-history view: this is the live session log
  * the "in-call chat toggle" screen calls for, not a place to browse past messages. */
+/** Height of the on-screen keyboard (0 when closed). Most mobile browsers overlay the keyboard
+ * on the page without shrinking the layout, so a bottom-anchored chat box ends up behind it —
+ * this reads the visual viewport so the box can sit just above the keyboard instead. `vh` is the
+ * height actually visible above it. */
+function useKeyboardInset() {
+  const [kb, setKb] = useState({ inset: 0, vh: typeof window !== 'undefined' ? window.innerHeight : 0 })
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setKb({ inset: Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)), vh: Math.round(vv.height) })
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    update()
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+  }, [])
+  return kb
+}
+
 function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose }) {
+  const kb = useKeyboardInset()
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState('')
@@ -268,7 +385,11 @@ function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose 
   // No panel — the conversation floats over the video like Instagram live comments, with just a
   // soft bottom gradient so white text stays readable on a bright background.
   return (
-    <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col pt-16 bg-gradient-to-t from-black/75 via-black/35 to-transparent animate-fade-in ${emojiOpen ? 'max-h-[70%]' : 'max-h-[50%]'}`}>
+    // Sits just above the keyboard while typing, and never taller than what's visible above it.
+    <div
+      className="absolute inset-x-0 z-30 flex flex-col pt-16 bg-gradient-to-t from-black/80 via-black/40 to-transparent animate-fade-in transition-[bottom] duration-150"
+      style={{ bottom: kb.inset, maxHeight: Math.round((kb.inset ? kb.vh : kb.vh || window.innerHeight) * (emojiOpen ? 0.7 : kb.inset ? 0.6 : 0.5)) }}
+    >
       {messages.length === 0
         ? <p className="px-4 pb-2 text-[12px] text-white/70" style={{ textShadow: '0 1px 3px rgba(0,0,0,.75)' }}>No messages yet — say hello!</p>
         : <FloatingComments comments={comments} fadeOut={false} scrollable endRef={bottomRef} className="flex-1 px-4" />}
@@ -278,6 +399,7 @@ function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose 
         <input
           ref={inputRef}
           value={text}
+          maxLength={2000}
           onChange={(e) => setText(e.target.value)}
           onFocus={() => setEmojiOpen(false)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
@@ -336,6 +458,19 @@ function CallBeautySheet({ settings, onChange, onClose }) {
   )
 }
 
+/** Labelled round call button — label under the icon so every control is self-explanatory;
+ * `active` = white (e.g. muted, camera off, panel open), `danger` = the red end-call button. */
+function CallControl({ icon, label, onClick, active = false, danger = false, disabled = false }) {
+  return (
+    <button onClick={onClick} disabled={disabled} className="flex w-[60px] flex-col items-center gap-1.5 disabled:opacity-60" aria-pressed={danger ? undefined : active}>
+      <span className={`grid place-items-center rounded-full transition active:scale-95 ${danger ? 'h-14 w-14 bg-rose-500 shadow-lg shadow-rose-500/40' : `h-12 w-12 backdrop-blur-md ${active ? 'bg-white text-ink-900' : 'bg-white/15 text-white'}`}`}>
+        <Icon name={icon} size={danger ? 22 : 20} />
+      </span>
+      <span className="text-[11px] font-medium text-white/85 leading-tight text-center whitespace-nowrap">{label}</span>
+    </button>
+  )
+}
+
 /* 18 — On call */
 export function ActiveCall() {
   const nav = useNavigate()
@@ -363,7 +498,12 @@ export function ActiveCall() {
   const [ending, setEnding] = useState(false)
   const [rtcErr, setRtcErr] = useState('')
   const [callErr, setCallErr] = useState('')
-  const [remoteJoined, setRemoteJoined] = useState(false)
+  const [remoteJoined, setRemoteJoined] = useState(false) // remote video is on right now
+  const [remoteSeen, setRemoteSeen] = useState(false) // the other person has connected at least once
+  const [remoteMuted, setRemoteMuted] = useState(false)
+  const [remoteStream, setRemoteStream] = useState(null) // same remote video, for the blurred backdrop
+  const [giftBeans, setGiftBeans] = useState(0) // gifts received during this call
+  const [confirmEnd, setConfirmEnd] = useState(false)
   const remoteJoinedRef = useRef(false)
   remoteJoinedRef.current = remoteJoined
   const [flipping, setFlipping] = useState(false)
@@ -379,6 +519,7 @@ export function ActiveCall() {
   const stageRef = useRef(null)
   const dragRef = useRef({ dragging: false, moved: false, startX: 0, startY: 0, origX: 0, origY: 0 })
   const remoteVideoRef = useRef(null)
+  const remoteBgRef = useRef(null)
   const localVideoRef = useRef(null)
   const sessionRef = useRef(null)
   const joinRef = useRef(null) // { key, promise } — see the join effect below
@@ -399,6 +540,47 @@ export function ActiveCall() {
     const t = setInterval(() => setElapsed((s) => s + 1), 1000)
     return () => clearInterval(t)
   }, [])
+
+  // Moves this call's media onto Agora — either because our own direct connection gave up
+  // (we ask the backend), or because the caller's did (`call:media-fallback` brings our token).
+  // Changing `media` re-runs the join effect below, which leaves p2p and joins Agora; billing
+  // is server-side and unaffected.
+  const switchToAgora = (res) => {
+    setMedia((cur) => (cur.mediaProvider === 'p2p'
+      ? { ...cur, mediaProvider: 'agora', channelName: res.channelName, agoraToken: res.agoraToken, iceServers: null }
+      : cur))
+  }
+  const fallBackToAgora = () => {
+    if (!callId) return
+    callsApi.mediaFallback(callId)
+      .then(switchToAgora)
+      .catch((e) => console.error('Could not move the call to Agora:', e))
+  }
+  useEffect(() => {
+    if (!callId) return
+    return onSocketEvent('call:media-fallback', (payload) => {
+      if (payload?.callId === callId) switchToAgora(payload)
+    })
+  }, [callId])
+
+  // Connection-quality summary for the admin p2p-vs-Agora comparison, then leave. Stats have
+  // to be read before leaving (that closes the connection they come from). Never blocks or
+  // fails the hang-up itself.
+  const reportAndLeave = async (session) => {
+    try {
+      if (callId) {
+        const report = session.kind === 'p2p'
+          ? await session.getStats()
+          : getAgoraCallStats(session.client, remoteJoinedRef.current)
+        callsApi.mediaReport(callId, report).catch(() => {})
+      }
+    } catch (e) {
+      console.error('Could not collect call stats:', e)
+    }
+    await leaveChannel(session)
+  }
+  const reportAndLeaveRef = useRef(reportAndLeave)
+  reportAndLeaveRef.current = reportAndLeave
 
   // Moves this call's media onto Agora — either because our own direct connection gave up
   // (we ask the backend), or because the caller's did (`call:media-fallback` brings our token).
@@ -514,7 +696,9 @@ export function ActiveCall() {
       .then((session) => {
         if (cancelled) return // a still-mounted invocation (if any) owns this session now
         sessionRef.current = session
-        session.localVideoTrack?.play(localVideoRef.current, { fit: 'cover' })
+        // Mirror the self-view (front camera) like every call app — only the local preview;
+        // the other person still receives the normal, unmirrored video.
+        session.localVideoTrack?.play(localVideoRef.current, { fit: 'cover', mirror: true })
       })
       .catch((e) => {
         if (cancelled) return
@@ -533,6 +717,15 @@ export function ActiveCall() {
       }, 400)
     }
   }, [channelName, agoraToken, iceServers, kind])
+
+  useEffect(() => {
+    const el = remoteBgRef.current
+    if (!el) return
+    el.srcObject = remoteStream
+    if (remoteStream) el.play().catch(() => {})
+  }, [remoteStream])
+
+  useEffect(() => onSocketEvent('gift:received', ({ beansCredited }) => setGiftBeans((b) => b + (beansCredited || 0))), [])
 
   useEffect(() => { sessionRef.current?.localAudioTrack?.setEnabled(!muted) }, [muted])
   useEffect(() => { sessionRef.current?.localVideoTrack?.setEnabled(cam) }, [cam])
@@ -583,7 +776,7 @@ export function ActiveCall() {
     return {
       x: Math.min(Math.max(x, PIP_MARGIN), Math.max(PIP_MARGIN, rect.width - PIP_W - PIP_MARGIN)),
       // keep clear of the header card up top and the control row at the bottom
-      y: Math.min(Math.max(y, 88), Math.max(88, rect.height - PIP_H - 110)),
+      y: Math.min(Math.max(y, 104), Math.max(104, rect.height - PIP_H - 150)),
     }
   }
 
@@ -591,7 +784,7 @@ export function ActiveCall() {
     const rect = stageRef.current?.getBoundingClientRect()
     if (!rect) return
     const origX = pipPos ? pipPos.x : rect.width - PIP_W - 16
-    const origY = pipPos ? pipPos.y : 96
+    const origY = pipPos ? pipPos.y : 112
     dragRef.current = { dragging: true, moved: false, startX: e.clientX, startY: e.clientY, origX, origY }
     e.currentTarget.setPointerCapture?.(e.pointerId)
   }
@@ -630,7 +823,9 @@ export function ActiveCall() {
     })
   }, [counterpartId])
 
-  const estBeans = Math.round((ratePaise * elapsed) / 60)
+  // Earnings so far, ticking up once per completed minute at this call's rate. An estimate from
+  // the rate snapshot (the final figure comes with the call summary).
+  const liveEarnedPaise = ratePaise * Math.floor(elapsed / 60)
 
   const endCall = async () => {
     if (sessionRef.current) {
@@ -649,32 +844,41 @@ export function ActiveCall() {
     }
   }
 
+  const pipStyle = { top: pipPos ? pipPos.y : 112, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }
+
   return (
     <ImmersiveLayout>
-      <div ref={stageRef} className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden text-white bg-gradient-to-b from-night-700 to-night-900">
-        <StatusBar dark />
-        <div className="w-full max-w-[480px] mx-auto px-4 pt-2 space-y-2">
-          {/* bg-black/45 (not the near-invisible white/8 this used to be) so the card actually
-              reads as a distinct floating element against an equally-dark video background,
-              instead of blending into it as a flat full-width strip. */}
-          <div className="rounded-2xl bg-black/45 backdrop-blur-md shadow-lg shadow-black/30 px-3.5 py-2.5 flex items-center gap-3 border border-white/10">
-            <Avatar name={callerName} size={38} className="ring-2 ring-white/15" />
+      {/* Edge to edge: the video fills the whole screen; the header and controls float on top
+          of it over soft dark fades (not solid strips that ate a quarter of the picture). */}
+      {/* fixed, not in page flow — focusing the chat box used to scroll the whole call view */}
+      <div ref={stageRef} className={`fixed inset-0 overflow-hidden text-white ${isVoice ? 'bg-gradient-to-b from-night-700 to-night-900' : 'bg-black'}`}>
+        <div className="absolute inset-x-0 top-0 z-30 bg-gradient-to-b from-black/70 via-black/35 to-transparent pb-10 pointer-events-none">
+          <StatusBar dark />
+          <div className="w-full max-w-[520px] mx-auto px-4 pt-1 flex items-center gap-3 pointer-events-auto">
+            <Avatar name={callerName} size={40} className="ring-2 ring-white/20" />
             <div className="flex-1 min-w-0">
-              <p className="text-[15px] font-semibold truncate">{callerName}</p>
-              <p className="text-[11.5px] text-white/55 flex items-center gap-1.5 mt-0.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {mm}:{ss} · {isVoice ? 'Voice call' : 'HD'}
+              <p className="text-[16px] font-semibold truncate drop-shadow">{callerName}</p>
+              <p className="text-[12px] text-white/75 flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {mm}:{ss}
+                {remoteSeen && remoteMuted && <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/80 px-1.5 py-px text-[10.5px] font-semibold text-white"><Icon name="mic-off" size={10} /> Muted</span>}
               </p>
             </div>
-            <span className="flex items-center gap-1.5 shrink-0 rounded-full bg-gold-400/15 border border-gold-400/25 px-2.5 py-1.5 text-[13px] font-bold text-gold-300">
-              <Icon name="gift" size={13} /> {estBeans}
+            <span className="flex flex-col items-end shrink-0 rounded-2xl bg-black/35 backdrop-blur-md border border-emerald-300/20 px-2.5 py-1" title="Earned so far on this call (estimate)">
+              <span className="text-[14px] font-extrabold text-emerald-300 tabular-nums">{rupees(liveEarnedPaise)}</span>
+              <span className="text-[9.5px] text-white/60 -mt-0.5">earned</span>
+            </span>
+            <span className="flex flex-col items-center shrink-0 rounded-2xl bg-black/35 backdrop-blur-md border border-gold-400/25 px-2.5 py-1" title="Gifts received on this call">
+              <span className="flex items-center gap-1 text-[14px] font-extrabold text-gold-300 tabular-nums"><Icon name="gift" size={12} />{giftBeans}</span>
+              <span className="text-[9.5px] text-white/60 -mt-0.5">gifts</span>
             </span>
           </div>
-          {callErr && <p className="text-[12px] text-rose-300 px-1">{callErr}</p>}
+          {callErr && <p className="max-w-[520px] mx-auto px-4 mt-1 text-[12px] text-rose-300">{callErr}</p>}
         </div>
+
         {isVoice ? (
           <>
             {/* Voice call — nothing to show but who you're talking to. */}
-            <div className="flex-1 flex flex-col items-center justify-center px-6">
+            <div className="absolute inset-0 flex flex-col items-center justify-center px-6">
               <div className="relative">
                 <span className="absolute inset-0 rounded-full bg-brand-400/30 animate-pulse-ring" />
                 <Avatar name={callerName} size={140} className="ring-4 ring-white/15" />
@@ -686,28 +890,31 @@ export function ActiveCall() {
           </>
         ) : (
           <>
-            {/* The small PIP tile is freely draggable anywhere on screen — like WhatsApp's
-                self-view bubble — and a plain tap (no movement) still swaps which video is
-                full-screen, same as before. Whichever is small stays `absolute` with an explicit
-                z-20; the big one is a plain in-flow `flex-1 relative` — that z-gap is what keeps
-                the small tile painting on top regardless of which video it currently holds (see
-                the stacking-order note this was originally added for). */}
+            {/* The small PIP tile is freely draggable (like WhatsApp's self-view bubble); a plain
+                tap swaps which video is full-screen. The big one fills the screen (absolute
+                inset-0); the small one sits above it at z-20, below the header/controls (z-30). */}
             <button
               onPointerDown={mainView === 'remote' ? onPipPointerDown : undefined}
               onPointerMove={mainView === 'remote' ? onPipPointerMove : undefined}
               onPointerUp={mainView === 'remote' ? onPipPointerUp : undefined}
               onPointerCancel={mainView === 'remote' ? onPipPointerUp : undefined}
-              style={mainView === 'local' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
+              style={mainView === 'local' ? undefined : pipStyle}
               className={mainView === 'local'
-                ? 'flex-1 relative w-full text-left'
-                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800 cursor-grab active:cursor-grabbing'}
+                ? 'absolute inset-0 w-full text-left'
+                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-gradient-to-br from-brand-400 to-night-800 ring-1 ring-white/20 shadow-xl shadow-black/40 cursor-grab active:cursor-grabbing'}
             >
               <div ref={localVideoRef} className="absolute inset-0 agora-video-fill" />
+              {!cam && (
+                <div className="absolute inset-0 grid place-items-center bg-night-800/90 text-white/70">
+                  <span className="flex flex-col items-center gap-1 text-[11px]"><Icon name="camera-off" size={mainView === 'local' ? 28 : 18} />{mainView === 'local' && 'Your camera is off'}</span>
+                </div>
+              )}
               <span
                 onClick={(e) => { e.stopPropagation(); flipCamera() }}
                 onPointerDown={(e) => e.stopPropagation()}
                 onPointerUp={(e) => e.stopPropagation()}
-                className={`absolute grid place-items-center rounded-full bg-black/50 text-white ${mainView === 'local' ? 'bottom-4 right-4 h-10 w-10' : 'bottom-1 right-1 h-7 w-7'} ${flipping ? 'opacity-50' : ''}`}
+                className={`absolute grid place-items-center rounded-full bg-black/50 text-white ${mainView === 'local' ? 'bottom-36 right-4 h-10 w-10' : 'bottom-1 right-1 h-7 w-7'} ${flipping ? 'opacity-50' : ''}`}
+                aria-label="Switch camera"
               >
                 <Icon name="flip" size={mainView === 'local' ? 16 : 13} />
               </span>
@@ -717,32 +924,69 @@ export function ActiveCall() {
               onPointerMove={mainView === 'local' ? onPipPointerMove : undefined}
               onPointerUp={mainView === 'local' ? onPipPointerUp : undefined}
               onPointerCancel={mainView === 'local' ? onPipPointerUp : undefined}
-              style={mainView === 'remote' ? undefined : { top: pipPos ? pipPos.y : 96, left: pipPos ? pipPos.x : undefined, right: pipPos ? undefined : 16, touchAction: 'none' }}
+              style={mainView === 'remote' ? undefined : pipStyle}
               className={mainView === 'remote'
-                ? 'flex-1 relative w-full text-left'
-                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-black text-left cursor-grab active:cursor-grabbing'}
+                ? 'absolute inset-0 w-full text-left'
+                : 'absolute z-20 h-40 w-28 rounded-2xl overflow-hidden bg-black text-left ring-1 ring-white/20 shadow-xl shadow-black/40 cursor-grab active:cursor-grabbing'}
             >
-              <div ref={remoteVideoRef} className="absolute inset-0 agora-video-fill" />
+              {/* blurred copy of the same video fills the space around the full (uncropped) picture */}
+              <video ref={remoteBgRef} autoPlay muted playsInline aria-hidden className={`absolute inset-0 h-full w-full object-cover scale-110 blur-2xl brightness-75 transition-opacity ${remoteJoined ? 'opacity-100' : 'opacity-0'}`} />
+              <div ref={remoteVideoRef} className="absolute inset-0 agora-video-contain" />
               {!remoteJoined && (
-                <div className="absolute inset-0 grid place-items-center">
-                  {rtcErr ? <p className="text-[13px] text-white/60 px-8 text-center">{rtcErr}</p> : <div className="h-56 w-56 rounded-full bg-white/5" />}
+                <div className="absolute inset-0 grid place-items-center bg-gradient-to-b from-night-700 to-night-900">
+                  {rtcErr && !remoteSeen ? <p className="text-[13px] text-white/60 px-8 text-center">{rtcErr}</p> : (
+                    <div className="flex flex-col items-center text-center">
+                      <div className="relative">
+                        {!remoteSeen && <span className="absolute inset-0 rounded-full bg-brand-400/30 animate-pulse-ring" />}
+                        <Avatar name={callerName} size={mainView === 'remote' ? 120 : 52} className="ring-4 ring-white/10" />
+                      </div>
+                      {mainView === 'remote' && (
+                        <p className="mt-4 text-[13px] text-white/70 flex items-center gap-1.5">
+                          {remoteSeen ? <><Icon name="camera-off" size={14} /> {callerName} turned their camera off</> : 'Connecting video…'}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </button>
           </>
         )}
-        <div className="w-full max-w-[480px] mx-auto pb-8 px-6 flex items-center justify-between">
-          <button onClick={() => setMuted((m) => !m)} className={`h-12 w-12 grid place-items-center rounded-full ${muted ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name={muted ? 'mic-off' : 'mic'} size={20} /></button>
-          {!isVoice && (
-            <>
-              <button onClick={() => setCam((c) => !c)} className={`h-12 w-12 grid place-items-center rounded-full ${cam ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={cam ? 'video' : 'camera-off'} size={20} /></button>
-              <button onClick={() => (beautyOpen ? closeBeauty() : openBeauty())} className={`h-12 w-12 grid place-items-center rounded-full ${beautyOpen ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name="sparkles" size={20} /></button>
-            </>
-          )}
-          <button onClick={() => { if (beautyOpen) closeBeauty(); setChatOpen((o) => !o) }} className={`h-12 w-12 grid place-items-center rounded-full ${chatOpen ? 'bg-white text-ink-900' : 'bg-white/12'}`}><Icon name="chat" size={20} /></button>
-          <button onClick={() => setGiftOpen(true)} className="h-12 w-12 grid place-items-center rounded-full bg-white/12"><Icon name="gift" size={20} /></button>
-          <button onClick={endCall} disabled={ending} className="h-14 w-14 grid place-items-center rounded-full bg-rose-500"><Icon name="phone-off" size={22} /></button>
+
+        {/* controls — floating over a dark fade, each labelled */}
+        <div className="absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-16 pb-6">
+          <div className="w-full max-w-[520px] mx-auto px-3 flex items-end justify-between">
+            <CallControl icon={muted ? 'mic-off' : 'mic'} label={muted ? 'Unmute' : 'Mute'} active={muted} onClick={() => setMuted((m) => !m)} />
+            {!isVoice && (
+              <>
+                <CallControl icon={cam ? 'video' : 'camera-off'} label={cam ? 'Stop video' : 'Start video'} active={!cam} onClick={() => setCam((c) => !c)} />
+                <CallControl icon="sparkles" label="Beauty" active={beautyOpen} onClick={() => (beautyOpen ? closeBeauty() : openBeauty())} />
+              </>
+            )}
+            <CallControl icon="chat" label="Chat" active={chatOpen} onClick={() => { if (beautyOpen) closeBeauty(); setChatOpen((o) => !o) }} />
+            <CallControl icon="gift" label="Ask gift" onClick={() => setGiftOpen(true)} />
+            <CallControl icon="phone-off" label="End" danger disabled={ending} onClick={() => setConfirmEnd(true)} />
+          </div>
         </div>
+
+        {/* Hanging up by accident costs the host money — confirm first. */}
+        {confirmEnd && (
+          <div className="absolute inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-[2px] p-4 animate-fade-in" onClick={() => setConfirmEnd(false)}>
+            <div className="w-full max-w-[360px] rounded-3xl bg-white p-5 text-ink-900 shadow-pop animate-pop-in" onClick={(e) => e.stopPropagation()} role="alertdialog" aria-label="End call?">
+              <div className="flex items-center gap-3">
+                <span className="grid place-items-center h-11 w-11 rounded-full bg-rose-50 text-rose-500 shrink-0"><Icon name="phone-off" size={18} /></span>
+                <div className="min-w-0">
+                  <p className="text-[17px] font-bold truncate">End call with {callerName}?</p>
+                  <p className="text-[13px] text-ink-400">You've talked {mm}:{ss}{ratePaise ? ` · ≈ ${rupees(liveEarnedPaise)} earned` : ''}</p>
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-2.5">
+                <button onClick={() => setConfirmEnd(false)} className="rounded-2xl bg-black/5 py-3 text-[14px] font-semibold text-ink-700">Keep talking</button>
+                <button onClick={() => { setConfirmEnd(false); endCall() }} disabled={ending} className="rounded-2xl bg-rose-500 py-3 text-[14px] font-semibold text-white disabled:opacity-60">End call</button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Overlay, not a route — navigating away used to unmount this screen entirely and
             tear down the live Agora session just to ask for a gift. */}
         {giftOpen && <GiftRequestSheet userId={counterpartId} onClose={() => setGiftOpen(false)} />}
@@ -752,7 +996,7 @@ export function ActiveCall() {
         {!chatOpen && !beautyOpen && (
           <FloatingComments
             comments={recentComments(chatMessages.filter((m) => m.senderId === counterpartId).map((m) => ({ id: m.id, name: callerName, text: m.content, at: m.at })), 4)}
-            className="absolute left-4 right-4 bottom-28 z-20 max-h-[35%] pointer-events-none"
+            className="absolute left-4 right-4 bottom-44 z-40 max-h-[35%] pointer-events-none"
           />
         )}
         {beautyOpen && <CallBeautySheet settings={beauty} onChange={updateBeauty} onClose={closeBeauty} />}
@@ -801,18 +1045,33 @@ export function CallSummary() {
   const secs = durationSec % 60
   const callerName = call?.callerName || 'Caller'
 
+  // Still fetching the call — skeleton instead of a placeholder "Caller · ₹0".
+  if (callId && !call && !err) {
+    return (
+      <AppLayout tab="/calls" title="Call ended" maxW="lg" bg="white">
+        <PlainHeader title="Call ended" />
+        <SkelGroup className="pt-8 lg:pt-2 pb-4"><SkelResult /></SkelGroup>
+      </AppLayout>
+    )
+  }
+
   return (
-    <AppLayout tab="/calls" title="Call ended" maxW="md" bg="white">
+    <AppLayout tab="/calls" title="Call ended" maxW="lg" bg="white">
       <PlainHeader title="Call ended" />
-      <div className="px-5 lg:px-0 pt-8 lg:pt-2 pb-4 flex flex-col items-center">
+      {/* Laptop: caller + earnings on the left, rating + actions on the right. */}
+      <div className="px-5 lg:px-0 pt-8 lg:pt-2 pb-4 flex flex-col items-center lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
+        <div className="w-full flex flex-col items-center lg:card lg:p-6">
         <Avatar name={callerName} size={92} className="ring-4 ring-brand-500/30" />
         <h2 className="mt-3 text-[22px] font-extrabold text-ink-900">{callerName}</h2>
         <p className="text-[13px] text-ink-400">{callKind(call) === 'voice' ? 'Voice call' : 'Video call'}{durationSec ? ` · ${mins} min ${secs} sec` : ''}</p>
+        {QUALITY[call?.durationQuality] && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-400">Call length <QualityPill q={call.durationQuality} size="lg" /></div>}
         <ErrorCard message={err} onRetry={load} compact className="w-full mt-3" />
-        <div className="card w-full mt-5 p-4">
+        <div className="card w-full mt-5 p-4 lg:bg-gold-50/60 lg:shadow-none">
           <div className="flex items-center justify-between"><span className="text-[14px] text-ink-500">You earned</span><span className="text-[22px] font-extrabold text-gold-500">{rupees(call?.totalAmountPaise)}</span></div>
         </div>
-        <div className="card w-full mt-3 p-4 text-center">
+        </div>
+        <div className="w-full">
+        <div className="card w-full mt-3 lg:mt-0 p-4 text-center">
           <p className="text-[14px] font-semibold text-ink-900">Rate this call</p>
           <div className="mt-2 flex justify-center gap-1.5">
             {[1, 2, 3, 4, 5].map((n) => (
@@ -824,6 +1083,7 @@ export function CallSummary() {
         <div className="w-full mt-4 space-y-3">
           <button onClick={() => nav('/home')} className="btn-primary">Back to home</button>
           <button onClick={() => nav('/report', { state: { targetId: call?.userId, targetName: callerName } })} className="btn-danger-outline"><Icon name="flag" size={16} /> Report this user</button>
+        </div>
         </div>
       </div>
     </AppLayout>

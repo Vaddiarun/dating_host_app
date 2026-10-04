@@ -8,6 +8,7 @@ import { profile as profileApi } from '../api/index.js'
 import { rupees, beans, referenceCode } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
 import { uploadAvatar } from '../lib/avatar.js'
+import { Skel, SkelGroup, SkelHero, SkelRows, SkelToggles, SkelList, SkelResult } from '../ui/Skeleton.jsx'
 
 /* 39 / 40 — Settings + Profile */
 export function Settings() {
@@ -31,15 +32,16 @@ export function Settings() {
   const videoRate = level?.currentPrices.videoRatePerMinutePaise
 
   return (
-    <AppLayout tab="/settings" title="Profile & settings" maxW="lg" bg="canvas" pad={false}>
-      <div className="lg:max-w-2xl lg:mx-auto lg:py-8">
-        <div className="relative bg-gradient-to-br from-brand-600 to-brand-800 px-5 lg:px-6 pt-3 lg:pt-6 pb-6 text-white lg:rounded-2xl">
-          <div className="flex items-center gap-3">
+    <AppLayout tab="/settings" title="Profile & settings" maxW="xl" bg="canvas" pad={false}>
+      {/* Laptop: profile as a sticky panel on the left, the settings list filling the right. */}
+      <div className="lg:max-w-5xl lg:mx-auto lg:px-8 lg:py-8 lg:grid lg:grid-cols-[300px_1fr] lg:gap-6 lg:items-start">
+        <div className="relative bg-gradient-to-br from-brand-600 to-brand-800 px-5 lg:px-6 pt-3 lg:pt-8 pb-6 lg:pb-7 text-white lg:rounded-3xl lg:sticky lg:top-6 lg:shadow-pop">
+          <div className="flex items-center gap-3 lg:flex-col lg:text-center">
             <Avatar name={name} size={56} src={me?.avatarUrl} className="ring-2 ring-white/40" />
             <div>
-              <p className="text-[19px] font-bold flex items-center gap-1.5">{name} {me?.kycStatus === 'approved' && <Icon name="shield-check" size={16} className="text-gold-300" />}</p>
+              <p className="text-[19px] font-bold flex items-center gap-1.5 lg:justify-center">{name} {me?.kycStatus === 'approved' && <Icon name="shield-check" size={16} className="text-gold-300" />}</p>
               <p className="text-[12px] text-white/70">{me?.phone}</p>
-              <div className="mt-1.5 flex gap-2">
+              <div className="mt-1.5 flex gap-2 lg:justify-center lg:flex-wrap">
                 <span className="pill bg-black/25 text-white text-[11px]">{rating?.average != null ? rating.average.toFixed(1) : '—'} ★</span>
                 <span className="pill bg-black/25 text-white text-[11px]">{rating?.count ?? 0} ratings</span>
                 {level && <span className="pill bg-gold-400/25 text-gold-200 text-[11px] flex items-center gap-1"><Icon name="crown" size={11} /> Level {level.level}</span>}
@@ -47,14 +49,14 @@ export function Settings() {
             </div>
           </div>
         </div>
-        <div className="px-5 lg:px-0 -mt-4 lg:mt-4 pb-4">
-          <SectionTitle className="mt-5 mb-1">Account</SectionTitle>
+        <div className="px-5 lg:px-0 -mt-4 lg:mt-0 pb-4">
+          <SectionTitle className="mt-5 lg:mt-0 mb-1">Account</SectionTitle>
           <div className="card px-4 divide-y divide-black/5">
             <Row icon="trending-up" tone="brand" title="Performance" sub="Meter, livestream score & leaderboards" onClick={() => nav('/settings/performance')} />
             <Row icon="settings" tone="brand" title="Edit profile" sub="Name, bio, languages" onClick={() => nav('/settings/edit-profile')} />
             <Row icon="image" tone="brand" title="Gallery" sub="Photos & videos" onClick={() => nav('/settings/gallery')} />
             <Row icon="sparkles" tone="gold" title="Beauty filter" sub="Smooth your camera in calls & live" onClick={() => nav('/settings/beauty-filter')} />
-            <Row icon="crown" tone="gold" title="Host level" sub={level ? `Level ${level.level} of ${level.maxLevel}${level.beansToNextLevel != null ? ` · ${beans(level.beansToNextLevel)} beans to next` : ' · Max level'}` : 'Your level & prices'} onClick={() => nav('/settings/level')} />
+            <Row icon="crown" tone="gold" title="Host level" sub={level ? `Level ${level.level} of ${level.maxLevel ?? level.levels?.length ?? 20}${level.beansToNextLevel != null ? ` · ${beans(level.beansToNextLevel)} beans to next` : ' · Max level'}` : 'Your level & prices'} onClick={() => nav('/settings/level')} />
             <Row icon="wallet" tone="gold" title="Rate settings" sub={videoRate ? `${rupees(videoRate)}/min video` : 'Set your rates'} onClick={() => nav('/settings/rates')} />
             <Row icon="shield-check" tone="green" title="KYC status" sub={me?.kycStatus?.replace('_', ' ')} right={<span className="pill bg-emerald-50 text-emerald-600 text-[11px] capitalize">{me?.kycStatus?.replace('_', ' ')}</span>} onClick={() => nav('/settings/kyc')} />
             <Row icon="card" tone="brand" title="Payout details" onClick={() => nav('/settings/payouts')} />
@@ -95,6 +97,15 @@ export function KycStatus() {
   const tone = status === 'approved' ? 'brand' : status === 'rejected' ? 'rose' : 'gold'
   const pillTone = status === 'approved' ? 'bg-emerald-50 text-emerald-600' : status === 'rejected' ? 'bg-rose-50 text-rose-500' : 'bg-gold-50 text-gold-600'
   const ref = referenceCode(kyc, me?.id)
+  // Still fetching — skeleton instead of briefly showing "Not submitted".
+  if (!kyc && !err) {
+    return (
+      <AppLayout tab="/settings" title="KYC status" back bottomNav={false} maxW="md" bg="white">
+        <TopBar title="KYC status" />
+        <SkelGroup className="py-8"><SkelResult /></SkelGroup>
+      </AppLayout>
+    )
+  }
   return (
     <AppLayout tab="/settings" title="KYC status" back bottomNav={false} maxW="md" bg="white">
       <TopBar title="KYC status" />
@@ -157,10 +168,11 @@ export function EditProfile() {
   }
 
   return (
-    <AppLayout tab="/settings" title="Edit profile" back bottomNav={false} maxW="md" bg="white">
+    <AppLayout tab="/settings" title="Edit profile" back bottomNav={false} maxW="lg" bg="white">
       <TopBar title="Edit profile" right={<button onClick={save} disabled={busy} className="rounded-xl bg-brand-600 text-white px-4 py-2 text-[14px] font-semibold disabled:opacity-60">{busy ? 'Saving…' : 'Save'}</button>} />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6">
-        <div className="flex flex-col items-center">
+      {/* Laptop: photo card on the left, the form in a card on the right. */}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 lg:grid lg:grid-cols-[240px_1fr] lg:gap-6 lg:items-start">
+        <div className="flex flex-col items-center lg:card lg:p-6 lg:sticky lg:top-6">
           <button type="button" onClick={() => avatarInputRef.current?.click()} className="relative">
             <Avatar name={name || 'Host'} size={88} src={avatarPreviewUrl || me?.avatarUrl} className="ring-4 ring-brand-500/30" />
             <span className="absolute bottom-0 right-0 h-7 w-7 grid place-items-center rounded-full bg-brand-600 text-white"><Icon name="camera" size={13} /></span>
@@ -173,15 +185,19 @@ export function EditProfile() {
             hidden
             onChange={(e) => pickAvatar(e.target.files?.[0] || null)}
           />
+          <p className="hidden lg:block mt-3 text-[15px] font-bold text-ink-900 text-center truncate max-w-full">{name || 'Host'}</p>
+          <button type="button" onClick={() => avatarInputRef.current?.click()} className="hidden lg:block mt-1 text-[12px] font-semibold text-brand-600">Change photo</button>
         </div>
-        <div className="mt-4 space-y-3.5">
-          <div><span className="label">Display name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
-          <div><span className="label">E-mail</span><input className="input" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-          <div><span className="label">Bio</span><input className="input" value={bio} onChange={(e) => setBio(e.target.value)} /></div>
-          <div><span className="label">Languages</span><input className="input" value={languages} onChange={(e) => setLanguages(e.target.value)} placeholder="Hindi, English" /></div>
+        <div>
+          <div className="mt-4 space-y-3.5 lg:mt-0 lg:card lg:p-6 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0">
+            <div><span className="label">Display name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
+            <div><span className="label">E-mail</span><input className="input" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+            <div className="lg:col-span-2"><span className="label">Bio</span><input className="input" value={bio} onChange={(e) => setBio(e.target.value)} /></div>
+            <div className="lg:col-span-2"><span className="label">Languages</span><input className="input" value={languages} onChange={(e) => setLanguages(e.target.value)} placeholder="Hindi, English" /></div>
+          </div>
+          <ErrorCard message={err} compact className="mt-3" />
+          <button onClick={save} disabled={busy} className="btn-primary mt-4 lg:hidden disabled:opacity-60">{busy ? 'Saving…' : 'Save changes'}</button>
         </div>
-        <ErrorCard message={err} compact className="mt-3" />
-        <button onClick={save} disabled={busy} className="btn-primary mt-4 lg:hidden disabled:opacity-60">{busy ? 'Saving…' : 'Save changes'}</button>
       </div>
     </AppLayout>
   )
@@ -202,18 +218,28 @@ export function HostLevel() {
   const pct = isMax ? 100 : Math.min(100, Math.round((intoLevel / (data?.beansPerLevel || 1)) * 100))
 
   return (
-    <AppLayout tab="/settings" title="Host level" back bottomNav={false} maxW="md" bg="canvas">
+    <AppLayout tab="/settings" title="Host level" back bottomNav={false} maxW="xl" bg="canvas">
       <TopBar title="Host level" />
       <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6">
         <ErrorCard message={err} onRetry={load} />
+        {!data && !err && (
+          <SkelGroup className="flex flex-col gap-4 lg:grid lg:grid-cols-[380px_1fr] lg:gap-6 lg:items-start">
+            <div className="space-y-4"><SkelHero height="h-40" /><SkelRows rows={3} /></div>
+            <SkelList rows={8} avatar={false} />
+          </SkelGroup>
+        )}
         {data && (
-          <>
-            <div className="rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 p-5 text-white">
+          // Phone: one column in the order-* sequence. Laptop: level, prices and "how it works"
+          // in a sticky left column, the full levels table on the right. Wrappers are
+          // `display: contents` on phone so each block is rendered once.
+          <div className="flex flex-col lg:grid lg:grid-cols-[380px_1fr] lg:gap-6 lg:items-start">
+          <div className="contents lg:block lg:sticky lg:top-6">
+            <div className="order-1 rounded-2xl bg-gradient-to-br from-brand-600 to-brand-800 p-5 text-white">
               <div className="flex items-center gap-3">
                 <span className="grid place-items-center h-14 w-14 rounded-2xl bg-gold-400/20 text-gold-300"><Icon name="crown" size={28} /></span>
                 <div>
                   <p className="text-[13px] text-white/70">Your level</p>
-                  <p className="text-[28px] font-extrabold leading-tight">Level {data.level}<span className="text-[15px] font-semibold text-white/60"> / {data.maxLevel}</span></p>
+                  <p className="text-[28px] font-extrabold leading-tight">Level {data.level}<span className="text-[15px] font-semibold text-white/60"> / {data.maxLevel ?? data.levels?.length ?? 20}</span></p>
                 </div>
               </div>
               <div className="mt-4 h-2.5 rounded-full bg-white/15 overflow-hidden">
@@ -225,6 +251,7 @@ export function HostLevel() {
               <p className="text-[12px] text-white/60">Lifetime earned: {beans(data.lifetimeEarnedBeans)} beans · withdrawals never lower your level</p>
             </div>
 
+            <div className="order-2">
             <SectionTitle className="mt-5 mb-2">Your prices now</SectionTitle>
             <div className="card px-4 divide-y divide-black/5">
               <PriceRow label="Video call" unit="/min" current={data.currentPrices.videoRatePerMinutePaise} max={data.maxPrices.videoRatePerMinutePaise} />
@@ -233,13 +260,27 @@ export function HostLevel() {
             </div>
             <button onClick={() => nav('/settings/rates')} className="btn-outline mt-3">Change my rates</button>
 
+            </div>
             {data.nextLevelMaxPrices && (
-              <p className="mt-4 text-[13px] text-ink-500">
+              <p className="order-3 mt-4 text-[13px] text-ink-500">
                 At Level {data.level + 1} you can charge up to {rupees(data.nextLevelMaxPrices.videoRatePerMinutePaise)}/min video, {rupees(data.nextLevelMaxPrices.voiceRatePerMinutePaise)}/min voice and {rupees(data.nextLevelMaxPrices.messageRatePaise)} per message.
               </p>
             )}
 
-            <SectionTitle className="mt-5 mb-2">All levels & prices</SectionTitle>
+            <div className="order-5">
+            <SectionTitle className="mt-5 mb-2">How levels work</SectionTitle>
+            <div className="card p-4 space-y-2.5 text-[13px] text-ink-600">
+              <p>• Everyone starts at <span className="font-semibold text-ink-900">Level 1</span>: ₹30/min video, ₹20/min voice and ₹5 per message.</p>
+              <p>• You move up one level for every <span className="font-semibold text-ink-900">{beans(data.beansPerLevel)} beans</span> you earn from calls, gifts and messages — automatically, no action needed.</p>
+              <p>• Each level raises your maximum video, voice and message price by <span className="font-semibold text-ink-900">₹20</span>. Level {data.maxLevel ?? data.levels?.length ?? 20} is the top.</p>
+              <p>• You can charge less than your maximum in Rate settings. Leave a rate empty to always charge your level's price — it goes up by itself when you level up.</p>
+              <p>• Withdrawing your beans never lowers your level — it's based on everything you've ever earned.</p>
+            </div>
+            </div>
+          </div>
+
+          <div className="order-4 lg:order-none">
+            <SectionTitle className="mt-5 lg:mt-0 mb-2">All levels & prices</SectionTitle>
             <p className="-mt-1 mb-2 text-[12px] text-ink-400">Maximum prices you can charge at each level. Prices are in ₹.</p>
             {/* A real <table> so columns stay aligned; scrolls sideways on narrow phones
                 instead of squashing six columns into the screen width. */}
@@ -284,15 +325,8 @@ export function HostLevel() {
               </table>
             </div>
 
-            <SectionTitle className="mt-5 mb-2">How levels work</SectionTitle>
-            <div className="card p-4 space-y-2.5 text-[13px] text-ink-600">
-              <p>• Everyone starts at <span className="font-semibold text-ink-900">Level 1</span>: ₹30/min video, ₹20/min voice and ₹5 per message.</p>
-              <p>• You move up one level for every <span className="font-semibold text-ink-900">{beans(data.beansPerLevel)} beans</span> you earn from calls, gifts and messages — automatically, no action needed.</p>
-              <p>• Each level raises your maximum video, voice and message price by <span className="font-semibold text-ink-900">₹20</span>. Level {data.maxLevel} is the top.</p>
-              <p>• You can charge less than your maximum in Rate settings. Leave a rate empty to always charge your level's price — it goes up by itself when you level up.</p>
-              <p>• Withdrawing your beans never lowers your level — it's based on everything you've ever earned.</p>
-            </div>
-          </>
+          </div>
+          </div>
         )}
       </div>
     </AppLayout>
@@ -370,15 +404,17 @@ export function RateSettings() {
   const hint = (cap) => (cap != null ? `Up to ${rupees(cap)} at Level ${level.level} · leave empty to use ${rupees(cap)}` : '')
 
   return (
-    <AppLayout tab="/settings" title="Rate settings" back bottomNav={false} maxW="md" bg="canvas">
+    <AppLayout tab="/settings" title="Rate settings" back bottomNav={false} maxW="lg" bg="canvas">
       <TopBar title="Rate settings" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
+      {/* Laptop: level note across the top, per-minute rates left, message price + availability right. */}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4 lg:grid lg:grid-cols-2 lg:gap-x-6 lg:items-start">
         {level && (
-          <div className="card p-3.5 mb-4 flex items-center gap-3">
+          <div className="card p-3.5 mb-4 flex items-center gap-3 lg:col-span-2">
             <span className="grid place-items-center h-10 w-10 rounded-xl bg-gold-50 text-gold-500"><Icon name="crown" size={18} /></span>
             <p className="flex-1 text-[13px] text-ink-500">You're at <span className="font-bold text-ink-900">Level {level.level}</span>. Your maximum prices go up by ₹20 with every level you earn.</p>
           </div>
         )}
+        <div>
         <SectionTitle className="mb-2">Per-minute rates (₹)</SectionTitle>
         <div className="card p-4 space-y-3.5">
           <div>
@@ -393,7 +429,9 @@ export function RateSettings() {
           </div>
           <div><span className="label">Private live</span><input className="input" value={priv} onChange={(e) => setPriv(e.target.value.replace(/[^\d.]/g, ''))} placeholder="30" /></div>
         </div>
-        <SectionTitle className="mt-5 mb-2">Per-message price (₹)</SectionTitle>
+        </div>
+        <div>
+        <SectionTitle className="mt-5 lg:mt-0 mb-2">Per-message price (₹)</SectionTitle>
         <div className="card p-4">
           <span className="label">Message from a user</span>
           <input className="input" value={message} onChange={(e) => setMessage(e.target.value.replace(/[^\d.]/g, ''))} placeholder={max ? String(max.messageRatePaise / 100) : ''} />
@@ -404,9 +442,12 @@ export function RateSettings() {
           <div className="flex items-center gap-3 pb-3"><span className="flex-1 text-[15px] font-semibold text-ink-900">Auto-accept calls</span><Toggle on={auto} onChange={setAuto} /></div>
           <div className="flex items-center gap-3 pt-3"><span className="flex-1 text-[15px] font-semibold text-ink-900">Voice calls only after 12 AM</span><Toggle on={night} onChange={setNight} /></div>
         </div>
-        <ErrorCard message={err} compact className="mt-3" />
-        {saved && <p className="mt-3 text-[13px] font-semibold text-emerald-600">Rates saved</p>}
-        <button onClick={save} disabled={busy} className="btn-primary mt-4 disabled:opacity-60">{busy ? 'Saving…' : 'Save rates'}</button>
+        </div>
+        <div className="lg:col-span-2 lg:flex lg:items-center lg:justify-end lg:gap-4">
+          <ErrorCard message={err} compact className="mt-3 lg:flex-1" />
+          {saved && <p className="mt-3 text-[13px] font-semibold text-emerald-600">Rates saved</p>}
+          <button onClick={save} disabled={busy} className="btn-primary mt-4 lg:w-auto lg:px-10 disabled:opacity-60">{busy ? 'Saving…' : 'Save rates'}</button>
+        </div>
       </div>
     </AppLayout>
   )
@@ -515,6 +556,7 @@ export function Gallery() {
           <button onClick={() => fileRef.current?.click()} disabled={uploading} className="aspect-square rounded-2xl border-2 border-dashed border-brand-300 bg-brand-50/60 grid place-items-center text-brand-500 disabled:opacity-60">
             {uploading ? <Icon name="refresh" size={20} className="animate-spinslow" /> : <Icon name="plus" size={22} />}
           </button>
+          {loading && [0, 1, 2, 3, 4].map((i) => <Skel key={i} className="aspect-square rounded-2xl" />)}
           {!loading && filtered.map((t) => (
             // Tapping used to delete instantly, no confirmation, no way to see it full-size
             // first — now it opens the viewer below; deleting only happens from an explicit
@@ -594,7 +636,7 @@ export function PayoutDetails() {
     <AppLayout tab="/settings" title="Payout details" back bottomNav={false} maxW="md" bg="canvas">
       <TopBar title="Payout details" />
       <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
-        {loading && <p className="text-[13px] text-ink-400 text-center py-4">Loading…</p>}
+        {loading && <SkelGroup><SkelRows rows={2} /></SkelGroup>}
         <ErrorCard message={err} onRetry={load} className="mb-3" />
         {!loading && !err && methods.length === 0 && <p className="text-[13px] text-ink-400 text-center py-4">No payout methods yet.</p>}
         {methods.map((m) => (
@@ -640,12 +682,13 @@ export function NotificationSettings() {
   }
 
   return (
-    <AppLayout tab="/settings" title="Notification settings" back bottomNav={false} maxW="md" bg="canvas">
+    <AppLayout tab="/settings" title="Notification settings" back bottomNav={false} maxW="xl" bg="canvas">
       <TopBar title="Notification settings" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 space-y-5">
-        {!prefs && !err && <p className="text-[13px] text-ink-400 text-center py-4">Loading…</p>}
-        <ErrorCard message={err} onRetry={load} />
-        <ErrorCard message={saveErr} compact />
+      {/* Laptop: the three groups side by side. */}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 space-y-5 lg:space-y-0 lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
+        {!prefs && !err && [4, 4, 3].map((n, i) => <SkelGroup key={i}><Skel className="h-3 w-24 rounded-md mb-2" /><SkelToggles rows={n} /></SkelGroup>)}
+        <ErrorCard message={err} onRetry={load} className="lg:col-span-3" />
+        <ErrorCard message={saveErr} compact className="lg:col-span-3" />
         {prefs && PREF_FIELDS.map(([g, rows]) => (
           <div key={g}>
             <SectionTitle className="mb-2">{g}</SectionTitle>
@@ -673,15 +716,20 @@ export function HelpSupport() {
     ['flag', 'rose', 'Reporting an abusive user'],
   ]
   return (
-    <AppLayout tab="/settings" title="Help & support" back bottomNav={false} maxW="md" bg="canvas">
+    <AppLayout tab="/settings" title="Help & support" back bottomNav={false} maxW="lg" bg="canvas">
       <TopBar title="Help & support" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6">
-        <SectionTitle className="mb-1">Popular topics</SectionTitle>
-        <div className="card px-4 divide-y divide-black/5">{topics.map(([i, t, l]) => <Row key={l} icon={i} tone={t} title={l} />)}</div>
-        <SectionTitle className="mt-5 mb-1">Legal</SectionTitle>
-        <div className="card px-4 divide-y divide-black/5">
-          <Row icon="file-text" tone="brand" title="Terms of service" />
-          <Row icon="file-text" tone="brand" title="Privacy policy" />
+      {/* Laptop: topics and legal side by side. */}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
+        <div>
+          <SectionTitle className="mb-1">Popular topics</SectionTitle>
+          <div className="card px-4 divide-y divide-black/5">{topics.map(([i, t, l]) => <Row key={l} icon={i} tone={t} title={l} />)}</div>
+        </div>
+        <div>
+          <SectionTitle className="mt-5 lg:mt-0 mb-1">Legal</SectionTitle>
+          <div className="card px-4 divide-y divide-black/5">
+            <Row icon="file-text" tone="brand" title="Terms of service" />
+            <Row icon="file-text" tone="brand" title="Privacy policy" />
+          </div>
         </div>
       </div>
     </AppLayout>

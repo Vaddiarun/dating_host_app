@@ -8,17 +8,20 @@ import { chat as chatApi } from '../api/index.js'
 import { timeAgo, clockTime } from '../lib/format.js'
 import { onSocketEventWhenReady } from '../lib/socket.js'
 import { errorMessage } from '../lib/errors.js'
+import { SkelGroup, SkelList, SkelBubbles } from '../ui/Skeleton.jsx'
+import { useChatUnread } from '../state/ChatUnreadContext.jsx'
 
 function ConversationList({ list, activeId, onPick, filter, setFilter, loading, err, onRetry }) {
+  const { unreadIds } = useChatUnread()
   return (
     <div className="lg:h-full lg:overflow-y-auto no-scrollbar">
       <div className="px-5 lg:px-4 pt-3 lg:pt-4">
         <Segmented options={['All', 'Unread']} value={filter} onChange={setFilter} />
       </div>
       <p className="section-title px-5 lg:px-4 mt-4 mb-1 text-[12px] font-semibold tracking-wide text-ink-400 uppercase">Recent</p>
-      {loading && <p className="px-5 lg:px-4 text-[13px] text-ink-400">Loading…</p>}
+      {loading && <SkelGroup className="px-5 lg:px-4"><SkelList rows={6} plain /></SkelGroup>}
       {!loading && err && <ErrorCard message={err} onRetry={onRetry} className="mx-5 lg:mx-4" />}
-      {!loading && !err && list.length === 0 && <p className="px-5 lg:px-4 text-[13px] text-ink-400">No conversations yet.</p>}
+      {!loading && !err && list.length === 0 && <p className="px-5 lg:px-4 text-[13px] text-ink-400">{filter === 'Unread' ? 'No unread messages.' : 'No conversations yet.'}</p>}
       <div className="px-5 lg:px-2 divide-y divide-black/5 lg:divide-y-0">
         {list.map((c) => {
           const name = c.otherParticipant?.name || c.otherParticipant?.phone || 'User'
@@ -30,11 +33,12 @@ function ConversationList({ list, activeId, onPick, filter, setFilter, loading, 
             >
               <Avatar name={name} size={46} />
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-ink-900">{name}</p>
-                <p className="text-[13px] text-ink-400 truncate">Tap to view conversation</p>
+                <p className={`text-[15px] text-ink-900 ${unreadIds.has(c.id) ? 'font-bold' : 'font-semibold'}`}>{name}</p>
+                <p className={`text-[13px] truncate ${unreadIds.has(c.id) ? 'text-ink-700 font-medium' : 'text-ink-400'}`}>{unreadIds.has(c.id) ? 'New message' : 'Tap to view conversation'}</p>
               </div>
-              <div className="text-right shrink-0">
-                <p className="text-[12px] text-ink-300">{timeAgo(c.lastMessageAt)}</p>
+              <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                <p className={`text-[12px] ${unreadIds.has(c.id) ? 'text-brand-600 font-semibold' : 'text-ink-300'}`}>{timeAgo(c.lastMessageAt)}</p>
+                {unreadIds.has(c.id) && <span className="h-2.5 w-2.5 rounded-full bg-brand-600" aria-label="Unread" />}
               </div>
             </button>
           )
@@ -46,6 +50,7 @@ function ConversationList({ list, activeId, onPick, filter, setFilter, loading, 
 
 function Thread({ conv }) {
   const nav = useNavigate()
+  const { markRead } = useChatUnread()
   const [sheet, setSheet] = useState(false)
   const [messages, setMessages] = useState([])
   const [loading, setLoading] = useState(true)
@@ -69,6 +74,8 @@ function Thread({ conv }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }) }, [messages])
+  // Viewing a conversation reads it — on open and whenever a message arrives while it's open.
+  useEffect(() => { markRead(conv.id) }, [conv.id, messages.length, markRead])
 
   useEffect(() => {
     if (!recipientId) return
@@ -107,7 +114,7 @@ function Thread({ conv }) {
       </div>
 
       <div className="flex-1 overflow-y-auto no-scrollbar px-4 lg:px-6 py-4 space-y-2.5 bg-canvas">
-        {loading && <p className="text-center text-[12px] text-ink-300">Loading…</p>}
+        {loading && <SkelGroup><SkelBubbles count={7} /></SkelGroup>}
         {!loading && err && <ErrorCard message={err} onRetry={load} />}
         {!loading && !err && messages.length === 0 && <p className="text-center text-[12px] text-ink-300">No messages yet — say hello!</p>}
         {messages.map((m) => {
@@ -136,7 +143,7 @@ function Thread({ conv }) {
       {sendErr && <p className="shrink-0 px-4 pb-1 text-[12px] text-rose-500 bg-white">{sendErr}</p>}
       <div className="shrink-0 p-3 border-t border-black/5 flex items-center gap-2 bg-white">
         <button onClick={() => setEmojiOpen((o) => !o)} className={`h-10 w-10 grid place-items-center rounded-full ${emojiOpen ? 'bg-brand-50 text-brand-600' : 'bg-black/5 text-ink-500'}`}><Icon name="smile" size={20} /></button>
-        <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)} onFocus={() => setEmojiOpen(false)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Message…" className="input flex-1 rounded-full" />
+        <input ref={inputRef} value={text} maxLength={2000} onChange={(e) => setText(e.target.value)} onFocus={() => setEmojiOpen(false)} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Message…" className="input flex-1 rounded-full" />
         <button onClick={send} disabled={sending || !text.trim()} className="h-10 w-10 grid place-items-center rounded-full bg-brand-600 text-white disabled:opacity-50"><Icon name="send" size={18} /></button>
       </div>
       {emojiOpen && <div className="shrink-0"><EmojiPicker onPick={(e) => setText((t) => insertAtCaret(inputRef.current, t, e))} /></div>}
@@ -178,7 +185,9 @@ export function Chat() {
   useEffect(() => onSocketEventWhenReady('chat:message', reloadConversations), [reloadConversations])
 
   const conv = conversations.find((c) => c.id === id)
-  const list = filter === 'Unread' ? [] : conversations
+  const { unreadIds } = useChatUnread()
+  // "Unread" used to always return an empty list.
+  const list = filter === 'Unread' ? conversations.filter((c) => unreadIds.has(c.id)) : conversations
 
   return (
     <AppLayout tab="/chat" title="Messages" maxW="full" bg="white" pad={false} bottomNav={!conv}>

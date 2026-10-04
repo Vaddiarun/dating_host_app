@@ -30,10 +30,11 @@ export function BeautySettings() {
 
   useEffect(() => {
     let cancelled = false
-    openBeautyCamera({ settings: initial, audio: false })
+    openBeautyCamera({ settings: initial, audio: false, alwaysDetect: true })
       .then((cam) => {
         if (cancelled) { cam.stop(); return }
         camRef.current = cam
+        if (import.meta.env.DEV) window.__beautyCamera = cam // devtools: __beautyCamera.stats
         if (beforeRef.current) { beforeRef.current.srcObject = cam.rawStream; beforeRef.current.play().catch(() => {}) }
         if (afterRef.current) { afterRef.current.srcObject = cam.stream; afterRef.current.play().catch(() => {}) }
         setReady(true)
@@ -46,6 +47,7 @@ export function BeautySettings() {
       cancelled = true
       clearInterval(poll)
       camRef.current?.stop()
+      if (import.meta.env.DEV && window.__beautyCamera === camRef.current) delete window.__beautyCamera
       if (capturedUrl) URL.revokeObjectURL(capturedUrl)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -94,9 +96,12 @@ export function BeautySettings() {
 
   return (
     <CenterLayout>
+      {/* Fixed-height column: the preview is pinned and only the controls below it scroll, so
+          switching tabs (whose content heights differ) never moves or re-centers the preview. */}
+      <div className="flex flex-col h-[100dvh] lg:h-[min(100dvh,920px)] min-h-0">
       <StatusBar />
       <TopBar title="Beauty filter" />
-      <div className="flex-1 overflow-y-auto px-5 lg:px-6 no-scrollbar">
+      <div className="shrink-0 px-5 lg:px-6">
         <div className="flex items-center justify-between gap-3">
           <p className="text-[12px] text-ink-400 flex-1">Real-time, face-aware processing — detects your face so eyes, lips and hair stay untouched.</p>
           <Toggle on={settings.enabled} onChange={(v) => update({ enabled: v })} />
@@ -131,7 +136,9 @@ export function BeautySettings() {
             <p className="text-[11px] text-ink-400 flex-1">Captured with the exact look above — Beauty Effects + Custom + Filter baked in.</p>
           </div>
         )}
+      </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 lg:px-6 pb-2 no-scrollbar">
         <BeautyControls settings={settings} onChange={update} />
 
         {saved === 'synced' && (
@@ -146,7 +153,8 @@ export function BeautySettings() {
         )}
       </div>
 
-      <div className="p-4"><button onClick={save} disabled={saving} className="btn-primary disabled:opacity-60"><Icon name="check" size={16} /> {saving ? 'Saving…' : 'Save'}</button></div>
+      <div className="shrink-0 p-4"><button onClick={save} disabled={saving} className="btn-primary disabled:opacity-60"><Icon name="check" size={16} /> {saving ? 'Saving…' : 'Save'}</button></div>
+      </div>
     </CenterLayout>
   )
 }

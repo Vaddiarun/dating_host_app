@@ -62,3 +62,19 @@ export function dayLabel(iso) {
   if (same(d, yest)) return 'Yesterday'
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
+
+/** Local calendar date as YYYY-MM-DD — deliberately not toISOString(), which is UTC and
+ * would roll over to the wrong day for IST before 5:30 AM. */
+export function isoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Seconds as "4h 12m" / "12m" / "45s" — the short form used for online and talk time. */
+export function duration(seconds) {
+  const s = Math.max(0, Math.round(seconds ?? 0))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  if (h) return m ? `${h}h ${m}m` : `${h}h`
+  if (m) return `${m}m`
+  return s ? `${s}s` : '0m'
+}

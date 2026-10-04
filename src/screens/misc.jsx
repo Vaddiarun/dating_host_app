@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { StatusBar, PlainHeader, TopBar, Avatar, Segmented, IconBadge, ResultScreen, SectionTitle, ErrorCard } from '../ui/kit.jsx'
+import { GiftRays, ConfettiBurst } from '../ui/GiftCelebration.jsx'
 import { AppLayout, ImmersiveLayout, CenterLayout } from '../ui/layouts.jsx'
 import { reportReasons } from '../data.js'
 import { moderation as moderationApi, gifts as giftsApi, notifications as notificationsApi } from '../api/index.js'
@@ -10,6 +11,7 @@ import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 import { errorMessage } from '../lib/errors.js'
 import { dayLabel, clockTime } from '../lib/format.js'
 import { onSocketEventWhenReady } from '../lib/socket.js'
+import { Skel, SkelGroup, SkelHero, SkelStats, SkelList } from '../ui/Skeleton.jsx'
 
 /* 44 — Notifications */
 // v1 notification types from the backend: gift, withdrawal_status, missed_call. Rendered
@@ -66,16 +68,33 @@ export function Notifications() {
   const groups = filtered.reduce((acc, n) => { (acc[dayLabel(n.createdAt) || 'Earlier'] ||= []).push(n); return acc }, {})
 
   return (
-    <AppLayout tab="/notifications" title="Notifications" back bottomNav={false} maxW="lg" bg="canvas">
+    <AppLayout tab="/notifications" title="Notifications" back bottomNav={false} maxW="xl" bg="canvas">
       <TopBar title="Notifications" sub={unreadCount ? `${unreadCount} unread` : undefined} right={unreadCount > 0 && (
         <button onClick={markAllRead} className="text-[12px] font-semibold text-brand-600">Mark all read</button>
       )} />
-      <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-6">
-        <div className="flex items-center gap-3">
+      {/* Laptop: an inbox-style filter rail on the left (with counts), the list on the right. */}
+      <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-6 lg:grid lg:grid-cols-[240px_1fr] lg:gap-x-6 lg:items-start">
+        <aside className="hidden lg:block lg:sticky lg:top-6 card p-2">
+          {['All', 'Money', 'Calls', 'System'].map((g) => {
+            const inGroup = items.filter((n) => g === 'All' || (NOTIF_GROUP[n.type] || 'System') === g)
+            const unread = inGroup.filter((n) => !notifRead(n)).length
+            return (
+              <button key={g} onClick={() => setF(g)} className={`w-full flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[14px] font-semibold transition ${f === g ? 'bg-brand-50 text-brand-700' : 'text-ink-600 hover:bg-black/[.03]'}`}>
+                <span className="flex-1">{g}</span>
+                {unread > 0 && <span className="h-5 min-w-5 px-1.5 grid place-items-center rounded-full bg-brand-600 text-white text-[11px]">{unread}</span>}
+                <span className="text-[12px] font-medium text-ink-400">{inGroup.length}</span>
+              </button>
+            )
+          })}
+          <div className="border-t border-black/5 mt-2 pt-2 px-1">
+            <button onClick={markAllRead} disabled={!unreadCount} className="w-full rounded-xl px-2 py-2 text-left text-[13px] font-semibold text-brand-600 hover:bg-brand-50 disabled:text-ink-300 disabled:hover:bg-transparent"><Icon name="check" size={13} className="inline -mt-0.5 mr-1" />Mark all read</button>
+          </div>
+        </aside>
+        <div className="lg:min-w-0">
+        <div className="flex items-center gap-3 lg:hidden">
           <Segmented options={['All', 'Money', 'Calls', 'System']} value={f} onChange={setF} />
-          <button onClick={markAllRead} className="hidden lg:block ml-auto shrink-0 text-[12px] font-semibold text-brand-600">Mark all read</button>
         </div>
-        {loading && <p className="text-[13px] text-ink-400 mt-6 text-center">Loading…</p>}
+        {loading && <SkelGroup><SkelList rows={5} avatar="square" title /></SkelGroup>}
         {!loading && err && <ErrorCard message={err} onRetry={() => load(1)} className="mt-6" />}
         {!loading && !err && filtered.length === 0 && <p className="text-[13px] text-ink-400 mt-6 text-center">Nothing here yet.</p>}
         {!err && Object.entries(groups).map(([day, list]) => (
@@ -101,6 +120,7 @@ export function Notifications() {
         {!loading && !err && hasMore && (
           <button onClick={() => load(page + 1)} className="btn-outline mt-4 text-[13px]">Load more</button>
         )}
+        </div>
       </div>
     </AppLayout>
   )
@@ -242,7 +262,7 @@ export function Blocked() {
 
 /* 48 — Ask for a gift */
 /**
- * The actual "ask for a gift" bottom sheet — factored out so it can be dropped in as an
+ * The actual "ask for a gift" popup (a centered dialog) — factored out so it can be dropped in as an
  * overlay on top of a live call/broadcast (see calls.jsx / live.jsx) instead of only being
  * reachable by navigating to a whole separate route. Navigating away used to unmount the
  * call screen entirely, which tore down the live Agora session just to ask for a gift.
@@ -268,10 +288,12 @@ export function GiftRequestSheet({ userId, onClose }) {
 
   const send = async () => {
     if (!pick) return
+    // Without a recipient this used to skip the request and still show "Request sent!".
+    if (!userId) { setSendErr('Still connecting to this user — try again in a moment.'); return }
     setBusy(true)
     setSendErr('')
     try {
-      if (userId) await giftsApi.request(userId, pick)
+      await giftsApi.request(userId, pick, note.trim().slice(0, 140) || undefined)
       setSent(true)
       setTimeout(onClose, 1200)
     } catch (e) {
@@ -281,16 +303,13 @@ export function GiftRequestSheet({ userId, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-30 flex items-end justify-center animate-fade-in">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      {/* Fixed-height single frame, not a scroll-to-find-the-button sheet: the gift grid is
-          the only part that scrolls (flex-1 min-h-0) — note input and Send are a pinned
-          footer, always on screen the moment the sheet opens. Previously everything (title,
-          grid, note, Send) sat in one scrolling column, so on a short viewport Send could sit
-          below the fold and needed a scroll/drag to even reach. */}
-      <div className="relative w-full max-w-[480px] bg-white rounded-t-3xl text-ink-900 animate-sheet-up max-h-[75dvh] flex flex-col">
+    <div className="fixed inset-0 z-40 flex items-center justify-center px-4 animate-fade-in">
+      <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={onClose} />
+      {/* Centered dialog with a fixed-height frame: the gift grid is the only part that
+          scrolls (flex-1 min-h-0) — note input and Send are a pinned footer, always visible
+          the moment it opens, however short the screen. */}
+      <div className="relative w-full max-w-[400px] bg-white rounded-3xl shadow-pop text-ink-900 animate-pop-in max-h-[80dvh] flex flex-col overflow-hidden">
         <div className="shrink-0 p-5 pb-3">
-          <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-black/15" />
           <div className="flex items-center justify-between">
             <h3 className="text-[17px] font-bold">Ask for a gift</h3>
             <button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-full bg-black/5 text-ink-500"><Icon name="x" size={15} /></button>
@@ -298,7 +317,11 @@ export function GiftRequestSheet({ userId, onClose }) {
         </div>
 
         {sent ? (
-          <p className="px-5 pb-5 text-[13px] text-emerald-600 font-semibold flex items-center gap-2"><Icon name="check" size={16} /> Request sent!</p>
+          <div className="px-5 pb-7 pt-2 flex flex-col items-center text-center animate-pop-in">
+            <span className="h-14 w-14 grid place-items-center rounded-full bg-emerald-50 text-emerald-600"><Icon name="check" size={26} /></span>
+            <p className="mt-3 text-[15px] font-bold">Request sent!</p>
+            <p className="mt-0.5 text-[12.5px] text-ink-400">They'll see your gift request right away.</p>
+          </div>
         ) : (
           <>
             <div className="flex-1 min-h-0 overflow-y-auto px-5 no-scrollbar">
@@ -314,7 +337,10 @@ export function GiftRequestSheet({ userId, onClose }) {
               </div>
             </div>
             <div className="shrink-0 p-5 pt-3 border-t border-black/5">
-              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a sweet note…" className="input" />
+              <div className="relative">
+                <input value={note} onChange={(e) => setNote(e.target.value.slice(0, 140))} maxLength={140} placeholder="Add a sweet note…" className="input pr-14" />
+                {note && <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold ${note.length > 125 ? 'text-gold-600' : 'text-ink-300'}`}>{140 - note.length}</span>}
+              </div>
               {sendErr && <p className="text-[12px] text-rose-500 mt-2">{sendErr}</p>}
               <button onClick={send} disabled={busy || !pick} className="btn-gold mt-2.5 disabled:opacity-60"><Icon name="gift" size={16} /> {busy ? 'Sending…' : 'Send request'}</button>
             </div>
@@ -362,8 +388,10 @@ export function GiftReceived() {
       <div className="mx-auto flex min-h-[100dvh] max-w-[520px] flex-col text-white bg-gradient-to-b from-night-800 to-night-900">
         <StatusBar dark />
         <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
-          <span className="grid place-items-center h-40 w-40 rounded-full bg-white/5 animate-slide-up">
-            <span className="grid place-items-center h-24 w-24 rounded-full bg-gold-400 text-white text-4xl">👑</span>
+          <span className="relative grid place-items-center h-40 w-40">
+            <GiftRays size={320} />
+            <ConfettiBurst count={36} spread={200} />
+            <span className="relative grid place-items-center h-24 w-24 rounded-full bg-gradient-to-br from-gold-300 to-gold-500 text-white text-4xl shadow-[0_16px_40px_-10px_rgba(224,169,46,.9)] gift-pop">👑</span>
           </span>
           <h2 className="mt-6 text-[22px] font-extrabold">Gift received!</h2>
           <p className="text-[13px] text-white/60 mt-1">Check Earnings for the latest gift totals</p>
@@ -383,13 +411,11 @@ export function LoadingState() {
   return (
     <AppLayout tab="/earnings" title="Earnings" maxW="xl" bg="canvas">
       <PlainHeader title="Earnings" sub="Loading…" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4 space-y-4 animate-pulse">
-        <div className="h-40 rounded-2xl bg-black/[.06]" />
-        <div className="grid grid-cols-3 gap-3">{[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-2xl bg-black/[.06]" />)}</div>
-        {[0, 1, 2, 3, 4].map((i) => (
-          <div key={i} className="flex items-center gap-3"><div className="h-10 w-10 rounded-full bg-black/[.06]" /><div className="flex-1 space-y-1.5"><div className="h-3 w-2/3 rounded bg-black/[.06]" /><div className="h-3 w-1/3 rounded bg-black/[.06]" /></div><div className="h-3 w-10 rounded bg-black/[.06]" /></div>
-        ))}
-      </div>
+      <SkelGroup className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4 space-y-4">
+        <SkelHero height="h-40" />
+        <SkelStats count={3} />
+        <SkelList rows={5} />
+      </SkelGroup>
     </AppLayout>
   )
 }
