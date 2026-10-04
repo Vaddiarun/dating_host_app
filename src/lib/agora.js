@@ -80,7 +80,9 @@ export async function joinAndPublish({ channelName, token, uid, video = true, mo
       // device, which is exactly the class of NOT_READABLE bug fixed earlier for the
       // camera itself.
       beautyCamera = await openBeautyCamera({ settings: beautySettings, audio: false })
-      localVideoTrack = RTC.createCustomVideoTrack({ mediaStreamTrack: beautyCamera.videoTrack })
+      // Same bitrate range as the plain camera's '720p_1' below (and the User app's camera) —
+      // left unset, Agora picks its own (undocumented) bitrate for a custom track.
+      localVideoTrack = RTC.createCustomVideoTrack({ mediaStreamTrack: beautyCamera.videoTrack, bitrateMin: 600, bitrateMax: 1130 })
     } else {
       // Same 1280x720 the beauty pipeline above captures at (beautyFilter.js) — the highest
       // resolution in Agora's HD billing tier; the SDK's 480p default costs the same.

@@ -70,7 +70,10 @@ export function getBeautySettings() {
 const FACE_DETECT_INTERVAL_MS = 80
 const FACE_HOLD_MS = 450
 const PRESENCE_EASE = 0.15
-const MAX_PROCESS_DIM = 960
+// 1280 (not the Canvas2D pipeline's 960): this canvas is the video a call/broadcast sends, so
+// at 960 the host went out at ~960x540 while the user sends full 1280x720 — visibly softer on
+// the user's side. 1280x720 is still exactly Agora's HD billing ceiling, and the GPU handles it.
+const MAX_PROCESS_DIM = 1280
 const SCRATCH_SCALE = 0.5
 const FRAME_INTERVAL_MS = 1000 / 31
 const DETECT_BACKOFF_MAX_MS = 8000

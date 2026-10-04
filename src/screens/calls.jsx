@@ -582,47 +582,6 @@ export function ActiveCall() {
   const reportAndLeaveRef = useRef(reportAndLeave)
   reportAndLeaveRef.current = reportAndLeave
 
-  // Moves this call's media onto Agora — either because our own direct connection gave up
-  // (we ask the backend), or because the caller's did (`call:media-fallback` brings our token).
-  // Changing `media` re-runs the join effect below, which leaves p2p and joins Agora; billing
-  // is server-side and unaffected.
-  const switchToAgora = (res) => {
-    setMedia((cur) => (cur.mediaProvider === 'p2p'
-      ? { ...cur, mediaProvider: 'agora', channelName: res.channelName, agoraToken: res.agoraToken, iceServers: null }
-      : cur))
-  }
-  const fallBackToAgora = () => {
-    if (!callId) return
-    callsApi.mediaFallback(callId)
-      .then(switchToAgora)
-      .catch((e) => console.error('Could not move the call to Agora:', e))
-  }
-  useEffect(() => {
-    if (!callId) return
-    return onSocketEvent('call:media-fallback', (payload) => {
-      if (payload?.callId === callId) switchToAgora(payload)
-    })
-  }, [callId])
-
-  // Connection-quality summary for the admin p2p-vs-Agora comparison, then leave. Stats have
-  // to be read before leaving (that closes the connection they come from). Never blocks or
-  // fails the hang-up itself.
-  const reportAndLeave = async (session) => {
-    try {
-      if (callId) {
-        const report = session.kind === 'p2p'
-          ? await session.getStats()
-          : getAgoraCallStats(session.client, remoteJoinedRef.current)
-        callsApi.mediaReport(callId, report).catch(() => {})
-      }
-    } catch (e) {
-      console.error('Could not collect call stats:', e)
-    }
-    await leaveChannel(session)
-  }
-  const reportAndLeaveRef = useRef(reportAndLeave)
-  reportAndLeaveRef.current = reportAndLeave
-
   useEffect(() => {
     if (isP2P ? !callId || !iceServers : !channelName || !agoraToken) { setRtcErr('No call credentials — rejoin from Calls.'); return }
     if (!kind) return // still finding out voice vs video
