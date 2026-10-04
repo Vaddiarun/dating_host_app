@@ -4,7 +4,8 @@ import Icon from '../ui/Icon.jsx'
 import { StatusBar, PlainHeader, Avatar, Segmented, SectionTitle, ErrorCard, Toggle } from '../ui/kit.jsx'
 import { BeautyControls } from '../ui/BeautyControls.jsx'
 import { EmojiPicker, insertAtCaret } from '../ui/EmojiPicker.jsx'
-import { FloatingComments, recentComments } from '../ui/FloatingComments.jsx'
+import { FloatingComments, PhotoViewer, recentComments } from '../ui/FloatingComments.jsx'
+import { sendChatImage, isImageMessage } from '../lib/chatImage.js'
 import { GiftRequestSheet } from './misc.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
 import { calls as callsApi, chat as chatApi, profile as profileApi } from '../api/index.js'
@@ -350,14 +351,35 @@ function useKeyboardInset() {
   return kb
 }
 
-function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose }) {
+function CallChatDrawer({ recipientId, recipientName, messages, onSend, onUpdate, onClose }) {
   const kb = useKeyboardInset()
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState('')
   const [emojiOpen, setEmojiOpen] = useState(false)
+  const [viewing, setViewing] = useState(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
+  const fileRef = useRef(null)
+
+  // Photo: show it straight away from the local file (with a spinner), upload in the
+  // background, then swap in the saved message — or mark it "Not sent".
+  const sendPhoto = async (file) => {
+    if (!file) return
+    if (!recipientId) { setErr('Still connecting to the caller — try again in a moment.'); return }
+    setErr('')
+    setEmojiOpen(false)
+    const tempId = `local-img-${Date.now()}`
+    const preview = URL.createObjectURL(file)
+    onSend({ id: tempId, senderId: 'me', type: 'image', mediaUrl: preview, status: 'sending', at: Date.now() })
+    try {
+      const res = await sendChatImage(recipientId, file)
+      onUpdate(tempId, { id: res.messageId || tempId, senderId: res.senderId, mediaUrl: res.mediaUrl || preview, status: 'sent', createdAt: res.createdAt })
+    } catch (e) {
+      onUpdate(tempId, { status: 'failed' })
+      setErr(errorMessage(e, 'Could not send that photo.'))
+    }
+  }
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }) }, [messages])
 
@@ -379,7 +401,10 @@ function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose 
     }
   }
 
-  const comments = messages.map((m) => ({ id: m.id, name: m.senderId === recipientId ? recipientName : 'You', text: m.content, at: m.at }))
+  const comments = messages.map((m) => ({
+    id: m.id, name: m.senderId === recipientId ? recipientName : 'You', text: m.content, at: m.at,
+    image: isImageMessage(m) ? m.mediaUrl : null, status: m.status,
+  }))
 
   // No panel — the conversation floats over the video like Instagram live comments, with just a
   // soft bottom gradient so white text stays readable on a bright background.
@@ -391,10 +416,12 @@ function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose 
     >
       {messages.length === 0
         ? <p className="px-4 pb-2 text-[12px] text-white/70" style={{ textShadow: '0 1px 3px rgba(0,0,0,.75)' }}>No messages yet — say hello!</p>
-        : <FloatingComments comments={comments} fadeOut={false} scrollable endRef={bottomRef} className="flex-1 px-4" />}
+        : <FloatingComments comments={comments} fadeOut={false} scrollable endRef={bottomRef} onOpenImage={setViewing} className="flex-1 px-4" />}
       {err && <p className="px-4 pt-1 text-[11px] text-rose-300">{err}</p>}
       <div className="flex items-center gap-2 p-3">
         <button onClick={() => setEmojiOpen((o) => !o)} className={`h-9 w-9 shrink-0 grid place-items-center rounded-full ${emojiOpen ? 'bg-white text-ink-900' : 'bg-white/15 text-white'}`}><Icon name="smile" size={18} /></button>
+        <button onClick={() => fileRef.current?.click()} className="h-9 w-9 shrink-0 grid place-items-center rounded-full bg-white/15 text-white" aria-label="Send a photo"><Icon name="image" size={17} /></button>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { sendPhoto(e.target.files?.[0]); e.target.value = '' }} />
         <input
           ref={inputRef}
           value={text}
@@ -409,6 +436,7 @@ function CallChatDrawer({ recipientId, recipientName, messages, onSend, onClose 
         <button onClick={onClose} className="h-9 w-9 shrink-0 grid place-items-center rounded-full bg-white/15 text-white"><Icon name="x" size={16} /></button>
       </div>
       {emojiOpen && <EmojiPicker dark onPick={(e) => setText((t) => insertAtCaret(inputRef.current, t, e))} />}
+      <PhotoViewer src={viewing} onClose={() => setViewing(null)} />
     </div>
   )
 }
@@ -712,7 +740,7 @@ export function ActiveCall() {
     if (!counterpartId) return
     return onSocketEvent('chat:message', (m) => {
       if (m.senderId !== counterpartId) return
-      setChatMessages((prev) => [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, createdAt: m.createdAt, at: Date.now() }])
+      setChatMessages((prev) => [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, type: m.type, mediaUrl: m.mediaUrl, createdAt: m.createdAt, at: Date.now() }])
     })
   }, [counterpartId])
 
@@ -888,7 +916,7 @@ export function ActiveCall() {
             second by the call timer, which is what advances their fade-out. */}
         {!chatOpen && !beautyOpen && (
           <FloatingComments
-            comments={recentComments(chatMessages.filter((m) => m.senderId === counterpartId).map((m) => ({ id: m.id, name: callerName, text: m.content, at: m.at })), 4)}
+            comments={recentComments(chatMessages.filter((m) => m.senderId === counterpartId).map((m) => ({ id: m.id, name: callerName, text: m.content, at: m.at, image: isImageMessage(m) ? m.mediaUrl : null })), 4)}
             className="absolute left-4 right-4 bottom-44 z-40 max-h-[35%] pointer-events-none"
           />
         )}
@@ -899,6 +927,7 @@ export function ActiveCall() {
             recipientName={callerName}
             messages={chatMessages}
             onSend={(m) => setChatMessages((prev) => [...prev, m])}
+            onUpdate={(id, patch) => setChatMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)))}
             onClose={() => setChatOpen(false)}
           />
         )}

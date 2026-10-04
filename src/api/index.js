@@ -88,6 +88,13 @@ export const calls = {
 
 export const chat = {
   send: (recipientId, content) => apiFetch('/chat/messages', { method: 'POST', body: { recipientId, content } }),
+  // Photos: presign → PUT to S3 → send a message that references the uploaded key (same
+  // presign-then-save shape as the avatar/gallery uploads). See lib/chatImage.js.
+  imageUploadUrl: (recipientId, contentType) =>
+    apiFetch('/chat/attachments/upload-url', { method: 'POST', body: { recipientId, contentType } }),
+  uploadImage: (uploadUrl, blob) => uploadToPresignedUrl(uploadUrl, blob),
+  sendImage: (recipientId, mediaKey, caption = '') =>
+    apiFetch('/chat/messages', { method: 'POST', body: { recipientId, type: 'image', mediaKey, content: caption } }),
   listConversations: () => apiFetch('/chat/conversations'),
   getMessages: (conversationId, page = 1, pageSize = 50) =>
     apiFetch(`/chat/conversations/${conversationId}/messages`, { query: { page, pageSize } }),

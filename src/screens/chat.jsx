@@ -10,6 +10,8 @@ import { onSocketEventWhenReady } from '../lib/socket.js'
 import { errorMessage } from '../lib/errors.js'
 import { SkelGroup, SkelList, SkelBubbles } from '../ui/Skeleton.jsx'
 import { useChatUnread } from '../state/ChatUnreadContext.jsx'
+import { PhotoViewer } from '../ui/FloatingComments.jsx'
+import { isImageMessage } from '../lib/chatImage.js'
 
 function ConversationList({ list, activeId, onPick, filter, setFilter, loading, err, onRetry }) {
   const { unreadIds } = useChatUnread()
@@ -60,6 +62,7 @@ function Thread({ conv }) {
   const [sendErr, setSendErr] = useState('')
   const [emojiOpen, setEmojiOpen] = useState(false)
   const inputRef = useRef(null)
+  const [viewing, setViewing] = useState(null)
   const recipientId = conv.otherParticipant?.id
   const name = conv.otherParticipant?.name || conv.otherParticipant?.phone || 'User'
   const bottomRef = useRef(null)
@@ -81,7 +84,7 @@ function Thread({ conv }) {
     if (!recipientId) return
     return onSocketEventWhenReady('chat:message', (m) => {
       if (m.conversationId !== conv.id && m.senderId !== recipientId) return
-      setMessages((prev) => (prev.some((x) => x.id === m.messageId) ? prev : [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, createdAt: m.createdAt }]))
+      setMessages((prev) => (prev.some((x) => x.id === m.messageId) ? prev : [...prev, { id: m.messageId, senderId: m.senderId, content: m.content, type: m.type, mediaUrl: m.mediaUrl, createdAt: m.createdAt }]))
     })
   }, [conv.id, recipientId])
 
@@ -119,6 +122,19 @@ function Thread({ conv }) {
         {!loading && !err && messages.length === 0 && <p className="text-center text-[12px] text-ink-300">No messages yet — say hello!</p>}
         {messages.map((m) => {
           const mine = m.senderId !== recipientId
+          if (isImageMessage(m)) {
+            return (
+              <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[76%] ${mine ? 'text-right' : ''}`}>
+                  <button type="button" onClick={() => setViewing(m.mediaUrl)} className="block overflow-hidden rounded-2xl border border-black/5" aria-label="Open photo">
+                    <img src={m.mediaUrl} alt="" className="block max-h-64 max-w-[220px] object-cover" />
+                  </button>
+                  {m.content && <p className="mt-1 text-[14px] text-ink-900">{m.content}</p>}
+                  <span className="block text-[10px] text-ink-300">{clockTime(m.createdAt)}</span>
+                </div>
+              </div>
+            )
+          }
           if (isJumboEmoji(m.content)) {
             return (
               <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
@@ -139,6 +155,7 @@ function Thread({ conv }) {
         })}
         <div ref={bottomRef} />
       </div>
+      <PhotoViewer src={viewing} onClose={() => setViewing(null)} />
 
       {sendErr && <p className="shrink-0 px-4 pb-1 text-[12px] text-rose-500 bg-white">{sendErr}</p>}
       <div className="shrink-0 p-3 border-t border-black/5 flex items-center gap-2 bg-white">
