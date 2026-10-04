@@ -70,7 +70,10 @@ export function getBeautySettings() {
 const FACE_DETECT_INTERVAL_MS = 80
 const FACE_HOLD_MS = 450
 const PRESENCE_EASE = 0.15
-const MAX_PROCESS_DIM = 960
+// 1280 (not the Canvas2D pipeline's 960): this canvas is the video a call/broadcast sends, so
+// at 960 the host went out at ~960x540 while the user sends full 1280x720 — visibly softer on
+// the user's side. 1280x720 is still exactly Agora's HD billing ceiling, and the GPU handles it.
+const MAX_PROCESS_DIM = 1280
 const SCRATCH_SCALE = 0.5
 const FRAME_INTERVAL_MS = 1000 / 31
 const DETECT_BACKOFF_MAX_MS = 8000
@@ -787,7 +790,6 @@ export async function openBeautyCamera(opts = {}) {
 
   const draw = () => {
     if (!running) return
-    raf = requestAnimationFrame(draw)
     const now = performance.now()
     if (now - lastFrameAt < FRAME_INTERVAL_MS) return
     lastFrameAt = now
@@ -829,7 +831,24 @@ export async function openBeautyCamera(opts = {}) {
       fpsWindowStart = now
     }
   }
-  draw()
+  // The browser pauses requestAnimationFrame while the page is hidden (minimized window,
+  // another tab, app switched away). This canvas IS the video a call/broadcast sends, so with
+  // rAF alone the other side saw a frozen frame while audio carried on. While hidden, a Web
+  // Worker's timer (not paused or throttled the way page timers are) drives the frames instead.
+  const loop = () => {
+    if (!running) return
+    raf = requestAnimationFrame(loop)
+    draw()
+  }
+  const hiddenTicker = new Worker(URL.createObjectURL(new Blob(
+    ['let t = null; onmessage = (e) => { clearInterval(t); if (e.data > 0) t = setInterval(() => postMessage(0), e.data) }'],
+    { type: 'text/javascript' },
+  )))
+  hiddenTicker.onmessage = draw
+  const onVisibility = () => hiddenTicker.postMessage(document.hidden ? FRAME_INTERVAL_MS : 0)
+  document.addEventListener('visibilitychange', onVisibility)
+  onVisibility()
+  loop()
 
   const canvasStream = canvas.captureStream(30)
   const videoTrack = canvasStream.getVideoTracks()[0]
@@ -900,6 +919,8 @@ export async function openBeautyCamera(opts = {}) {
     stop() {
       running = false
       cancelAnimationFrame(raf)
+      document.removeEventListener('visibilitychange', onVisibility)
+      hiddenTicker.terminate()
       rawStream.getTracks().forEach((t) => t.stop())
       videoTrack.stop()
       video.srcObject = null
