@@ -9,6 +9,7 @@ import { rupees, beans, referenceCode, duration } from '../lib/format.js'
 import logoUrl from '../assets/logo.png'
 import { errorMessage } from '../lib/errors.js'
 import { uploadAvatar } from '../lib/avatar.js'
+import SupportFab from '../ui/SupportFab.jsx'
 import { Skel, SkelGroup, SkelHero, SkelRows, SkelToggles, SkelList, SkelResult } from '../ui/Skeleton.jsx'
 
 /* 39 / 40 — Settings + Profile */
@@ -96,7 +97,7 @@ export function Settings() {
           </div>
         </div>
 
-        <div className="px-5 lg:px-0 pb-6">
+        <div className="px-5 lg:px-0 pb-24 lg:pb-6">
           <div className="divide-y divide-black/5">
             <Row icon="user" tone="brand" title="My Profile & Gallery" sub="Name, bio, languages" onClick={() => nav('/settings/edit-profile')} />
             <Row icon="card" tone="gold" title="Rate settings" sub={videoRate ? `${rupees(videoRate)}/min video` : 'Set your rates'} onClick={() => nav('/settings/rates')} />
@@ -132,6 +133,8 @@ export function Settings() {
           </div>
         </div>
       </div>
+
+      <SupportFab />
 
       {logoutOpen && (
         <div className="fixed inset-0 z-[70] flex flex-col justify-end lg:justify-center lg:items-center" onClick={() => setLogoutOpen(false)}>
@@ -983,6 +986,7 @@ export function HelpSupport() {
   return (
     <AppLayout tab="/settings" title="Help & support" back bottomNav={false} maxW="lg" bg="canvas">
       <TopBar title="Help & support" />
+      <SupportFab aboveNav={false} />
       <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
         <div>
           <div className="rounded-2xl border border-black/[.06] bg-white p-4 shadow-sm">
