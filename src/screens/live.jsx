@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { StatusBar, PlainHeader, Avatar, Toggle } from '../ui/kit.jsx'
 import { AppLayout, ImmersiveLayout } from '../ui/layouts.jsx'
-import { live as liveApi } from '../api/index.js'
+import { live as liveApi, config as configApi } from '../api/index.js'
 import { joinAndPublish, leaveChannel, switchToNextCamera } from '../lib/agora.js'
 import { publishToSfu } from '../lib/sfu.js'
 import { getBeautySettings, openBeautyCamera, openCameraFacing } from '../lib/beautyFilter.js'
@@ -174,6 +174,11 @@ export function Broadcast() {
   const isSfu = mediaProvider === 'cloudflare'
   const [chat, setChat] = useState([])
   const [text, setText] = useState('')
+  // Admin-editable on the backend (GET /config → appSettings); 2000 until it loads.
+  const [commentMax, setCommentMax] = useState(2000)
+  useEffect(() => {
+    configApi.get().then((c) => setCommentMax(c?.appSettings?.liveCommentMaxLength ?? 2000)).catch(() => {})
+  }, [])
   const [ending, setEnding] = useState(false)
   const [mic, setMic] = useState(micOn)
   const [rtcErr, setRtcErr] = useState('')
@@ -415,7 +420,7 @@ export function Broadcast() {
           <button onClick={() => setMic((m) => !m)} className={`h-11 w-11 grid place-items-center rounded-full ${mic ? 'bg-white/12' : 'bg-white text-ink-900'}`}><Icon name={mic ? 'mic' : 'mic-off'} size={18} /></button>
           {/* Emoji button sits inside the input pill — the row already holds mic/send/end. */}
           <div className="relative flex-1">
-            <input ref={chatInputRef} value={text} maxLength={2000} onChange={(e) => { setText(e.target.value); setChatErr('') }} onFocus={() => setEmojiOpen(false)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Say something…" className="w-full rounded-full bg-white/15 border border-white/10 pl-4 pr-11 py-2.5 text-[14px] text-white placeholder:text-white/60 outline-none" />
+            <input ref={chatInputRef} value={text} maxLength={commentMax} onChange={(e) => { setText(e.target.value); setChatErr('') }} onFocus={() => setEmojiOpen(false)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Say something…" className="w-full rounded-full bg-white/15 border border-white/10 pl-4 pr-11 py-2.5 text-[14px] text-white placeholder:text-white/60 outline-none" />
             <button onClick={() => setEmojiOpen((o) => !o)} className={`absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 grid place-items-center rounded-full ${emojiOpen ? 'bg-white text-ink-900' : 'text-white/80'}`}><Icon name="smile" size={18} /></button>
           </div>
           <button onClick={sendChat} disabled={!text.trim()} className="h-11 w-11 grid place-items-center rounded-full bg-white/12 disabled:opacity-50"><Icon name="send" size={19} /></button>

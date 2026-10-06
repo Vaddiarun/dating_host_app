@@ -176,7 +176,9 @@ export const moderation = {
   unblock: (userId) => apiFetch(`/moderation/blocks/${userId}`, { method: 'DELETE' }),
   report: (targetType, targetId, reason) =>
     apiFetch('/moderation/reports', { method: 'POST', body: { targetType, targetId, reason } }),
-  logCapture: (context, contextId) => apiFetch('/moderation/capture-event', { method: 'POST', body: { context, contextId } }),
+  // type: SCREENSHOT_ATTEMPT | SCREEN_RECORDING_SUSPECTED (count toward review) or PAGE_HIDDEN | DEVTOOLS_OPENED (logged only).
+  logCapture: (context, contextId, type = 'SCREENSHOT_ATTEMPT') =>
+    apiFetch('/moderation/capture-event', { method: 'POST', body: { context, contextId, type } }),
 }
 
 export { ApiError } from './client.js'

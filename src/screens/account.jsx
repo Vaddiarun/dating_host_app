@@ -502,7 +502,15 @@ export function SupportChat() {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [err, setErr] = useState('')
+  // After the host writes, the automatic assistant usually answers within seconds (if it's
+  // switched on) — show that it's replying, but never for more than 30 seconds.
+  const [awaitingReply, setAwaitingReply] = useState(false)
   const bottomRef = useRef(null)
+  useEffect(() => {
+    if (!awaitingReply) return
+    const t = setTimeout(() => setAwaitingReply(false), 30_000)
+    return () => clearTimeout(t)
+  }, [awaitingReply])
 
   const openTicket = (id) => supportApi.getTicket(id).then((res) => { setTicket(res.ticket || res); setMessages(res.messages || []) })
   const load = () => {
@@ -516,7 +524,7 @@ export function SupportChat() {
       .catch((e) => setState(e?.status === 404 ? 'unavailable' : 'error'))
   }
   useEffect(load, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }) }, [messages.length])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'end' }) }, [messages.length, awaitingReply])
 
   // Safety net next to the live socket event: re-check the open ticket every 5 seconds while the
   // chat is on screen, so a reply always shows up without leaving and reopening the chat.
@@ -528,6 +536,10 @@ export function SupportChat() {
       if (document.visibilityState !== 'visible' || sendingRef.current) return
       supportApi.getTicket(ticket.id).then((res) => {
         const next = res.messages || []
+        // needsAgent changes when the assistant hands the ticket to the team.
+        const fresh = res.ticket || res
+        setTicket((cur) => (cur && cur.needsAgent !== fresh.needsAgent ? fresh : cur))
+        if (next.some((m) => m.sender === 'bot' || m.sender === 'agent') && next[next.length - 1]?.sender !== 'host') setAwaitingReply(false)
         setMessages((cur) => (next.length !== cur.filter((m) => !String(m.id).startsWith('local-')).length ? next : cur))
       }).catch(() => {})
     }, 5000)
@@ -537,14 +549,16 @@ export function SupportChat() {
   useEffect(() => onSocketEventWhenReady('support:message', ({ ticketId, message } = {}) => {
     if (!message || (ticket && ticketId !== ticket.id)) return
     setMessages((m) => (m.some((x) => x.id === message.id) ? m : [...m, message]))
+    setAwaitingReply(false)
+    if (ticketId) supportApi.getTicket(ticketId).then((res) => setTicket(res.ticket || res)).catch(() => {})
   }), [ticket])
 
-  const send = async () => {
-    const content = text.trim()
+  const send = async (preset) => {
+    const content = (typeof preset === 'string' ? preset : text).trim()
     if (!content || sending) return
     setSending(true)
     setErr('')
-    setText('')
+    if (typeof preset !== 'string') setText('')
     setMessages((m) => [...m, { id: `local-${Date.now()}`, sender: 'host', content, createdAt: new Date().toISOString() }])
     try {
       if (ticket) {
@@ -552,11 +566,12 @@ export function SupportChat() {
         await openTicket(ticket.id)
       } else {
         const created = await supportApi.createTicket({ subject: content.slice(0, 80), category: 'other', content })
-        await openTicket(created.id || created.ticket?.id)
+        await openTicket(created.ticket?.id || created.id)
       }
+      setAwaitingReply(true)
     } catch (e) {
       setMessages((m) => m.filter((x) => !String(x.id).startsWith('local-')))
-      setText(content)
+      if (typeof preset !== 'string') setText(content)
       setErr(e?.status === 404 ? 'Support chat isn’t switched on yet. Please try again later.' : errorMessage(e, 'Message not sent. Try again.'))
     } finally {
       setSending(false)
@@ -584,26 +599,49 @@ export function SupportChat() {
               </div>
               {messages.map((m) => {
                 const mine = m.sender === 'host' || m.sender === 'user'
+                const bot = m.sender === 'bot'
                 return (
                   <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-[14px] ${mine ? 'rounded-br-md bg-brand-600 text-white' : 'rounded-bl-md bg-white text-ink-900 shadow-sm'}`}>
-                      {!mine && <span className="mb-0.5 block text-[11px] font-bold text-brand-600">{m.senderName || 'Support'}</span>}
+                      {!mine && (
+                        <span className="mb-0.5 flex items-center gap-1.5 text-[11px] font-bold text-brand-600">
+                          {bot ? 'Support assistant' : m.senderName || 'Support'}
+                          {bot && <span className="rounded-full bg-brand-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-brand-600">Automated</span>}
+                        </span>
+                      )}
                       {m.content}
                       <span className={`mt-1 block text-[10px] ${mine ? 'text-white/60' : 'text-ink-300'}`}>{clockTime(m.createdAt)}</span>
                     </div>
                   </div>
                 )
               })}
+              {awaitingReply && (
+                <div className="flex justify-start">
+                  <div className="rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-[13px] text-ink-400 shadow-sm">Assistant is replying…</div>
+                </div>
+              )}
               <div ref={bottomRef} />
             </>
           )}
         </div>
         {state === 'ready' && (
           <div className="sticky bottom-0 border-t border-black/5 bg-white px-3 py-3">
+            {ticket?.needsAgent && (
+              <p className="mb-2 rounded-xl bg-brand-50 px-3 py-2 text-[12px] font-medium text-brand-600">Our support team will reply here.</p>
+            )}
+            {ticket && !ticket.needsAgent && (
+              <button
+                onClick={() => send('I’d like to talk to a person.')}
+                disabled={sending}
+                className="mb-2 rounded-full border border-black/10 px-3 py-1 text-[12px] font-medium text-ink-500 disabled:opacity-40"
+              >
+                Talk to a person
+              </button>
+            )}
             <ErrorCard message={err} compact className="mb-2" />
             <div className="flex items-center gap-2">
               <input value={text} onChange={(e) => setText(e.target.value.slice(0, 2000))} onKeyDown={(e) => e.key === 'Enter' && send()} placeholder="Type your message…" className="input flex-1" />
-              <button onClick={send} disabled={sending || !text.trim()} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand-600 text-white disabled:opacity-50"><Icon name="send" size={17} /></button>
+              <button onClick={() => send()} disabled={sending || !text.trim()} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand-600 text-white disabled:opacity-50"><Icon name="send" size={17} /></button>
             </div>
           </div>
         )}
