@@ -58,9 +58,15 @@ export function Splash() {
 export function Login() {
   const nav = useNavigate()
   const { requestOtp } = useAuth()
+  const location = useLocation()
   const [num, setNum] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  // Referral code: prefilled from an invite link (#/login?ref=CODE), or typed in. Only used
+  // when this signup creates a new host account.
+  const refFromLink = new URLSearchParams(location.search).get('ref') || ''
+  const [refOpen, setRefOpen] = useState(!!refFromLink)
+  const [refCode, setRefCode] = useState(refFromLink.toUpperCase())
 
   const submit = async () => {
     const digits = num.replace(/\D/g, '')
@@ -70,7 +76,7 @@ export function Login() {
     setErr('')
     try {
       await requestOtp(phone)
-      nav('/otp', { state: { phone } })
+      nav('/otp', { state: { phone, referralCode: refCode.trim() || undefined } })
     } catch (e) {
       setErr(errorMessage(e, 'Could not send code. Try again.'))
     } finally {
@@ -101,6 +107,20 @@ export function Login() {
           />
         </div>
         <ErrorCard message={err} compact className="mt-2" />
+        {refOpen ? (
+          <div className="mt-3">
+            <span className="label">Referral code (optional)</span>
+            <input
+              value={refCode}
+              onChange={(e) => setRefCode(e.target.value.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 16))}
+              placeholder="e.g. K7P2XM9Q"
+              className="input tracking-[0.15em] font-semibold"
+              autoCapitalize="characters"
+            />
+          </div>
+        ) : (
+          <button type="button" onClick={() => setRefOpen(true)} className="mt-3 text-[13px] font-semibold text-brand-600">Have a referral code?</button>
+        )}
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-black/[.03] px-3 py-2.5 text-[12px] text-ink-400">
           <Icon name="shield" size={15} className="mt-0.5 shrink-0" /> By continuing you agree to the Terms and Privacy Policy.
         </div>
@@ -146,7 +166,7 @@ export function Otp() {
     setBusy(true)
     setErr('')
     try {
-      const me = await verifyOtp(phone, joined)
+      const me = await verifyOtp(phone, joined, location.state?.referralCode)
       nav(resolveEntryRoute(me), { replace: true })
     } catch (e) {
       setErr(errorMessage(e, 'Invalid code. Try again.'))

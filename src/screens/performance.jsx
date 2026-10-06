@@ -48,17 +48,16 @@ function PresenceCard({ isOnline, toggling, onToggle }) {
 }
 
 function InviteBanner() {
+  const nav = useNavigate()
   return (
-    <div className="card p-3.5 flex items-center gap-3 bg-brand-50/60 border-brand-100">
+    <button onClick={() => nav('/settings/refer')} className="card w-full text-left p-3.5 flex items-center gap-3 bg-brand-50/60 border-brand-100">
       <span className="grid place-items-center h-10 w-10 rounded-xl bg-brand-100 text-brand-600 shrink-0"><Icon name="sparkles" size={18} /></span>
       <div className="flex-1 min-w-0">
         <p className="text-[13.5px] font-bold text-ink-900">Invite hosts &amp; earn 15%</p>
         <p className="text-[11.5px] text-ink-400">Grow the creator community together</p>
       </div>
-      {/* No referral/invite endpoint exists yet — kept as a static preview of the design
-          rather than wiring a button to nothing. */}
-      <span className="pill bg-black/10 text-ink-400 text-[12px] font-bold shrink-0 px-3 py-1.5">Coming soon</span>
-    </div>
+      <span className="pill bg-brand-600 text-white text-[12px] font-bold shrink-0 px-3 py-1.5">Invite</span>
+    </button>
   )
 }
 

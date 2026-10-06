@@ -9,8 +9,10 @@ export const config = {
 
 export const auth = {
   requestOtp: (phone) => apiFetch('/auth/otp/request', { method: 'POST', auth: false, body: { phone } }),
-  verifyOtp: async (phone, code, role = 'host') => {
-    const data = await apiFetch('/auth/otp/verify', { method: 'POST', auth: false, body: { phone, code, role } })
+  // referralCode: optional — only counts when this creates a NEW host account; a wrong code
+  // never blocks signup (the response just has referralApplied: false).
+  verifyOtp: async (phone, code, role = 'host', referralCode) => {
+    const data = await apiFetch('/auth/otp/verify', { method: 'POST', auth: false, body: { phone, code, role, ...(referralCode ? { referralCode } : {}) } })
     setTokens(data)
     return data
   },
@@ -145,6 +147,21 @@ export const earnings = {
 export const stats = {
   daily: (date, tz) => apiFetch('/me/stats/daily', { query: { date, tz } }),
   range: (from, to, tz) => apiFetch('/me/stats/daily-summary', { query: { from, to, tz } }),
+}
+
+/** Referrals — NOT built on the backend yet (requested; see docs). Until they exist these 404 and
+ * the Refer & earn screens show the code from /me (if any) and an empty list. */
+export const referrals = {
+  list: (type = 'streamers') => apiFetch('/me/referrals', { query: { type } }),
+}
+
+/** In-app support chat — NOT built on the backend yet (requested; see docs). A 404 here means
+ * the support inbox isn't live, which the Help & support chat says plainly. */
+export const support = {
+  listTickets: () => apiFetch('/me/support/tickets'),
+  createTicket: (data) => apiFetch('/me/support/tickets', { method: 'POST', body: data }),
+  getTicket: (id) => apiFetch(`/me/support/tickets/${id}`),
+  reply: (id, content) => apiFetch(`/me/support/tickets/${id}/messages`, { method: 'POST', body: { content } }),
 }
 
 export const notifications = {

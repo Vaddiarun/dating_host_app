@@ -4,18 +4,32 @@ import Icon from '../ui/Icon.jsx'
 import { TopBar, Avatar, Toggle, Row, IconBadge, ResultScreen, SectionTitle, ErrorCard, ReferenceRow } from '../ui/kit.jsx'
 import { AppLayout } from '../ui/layouts.jsx'
 import { useAuth } from '../state/AuthContext.jsx'
-import { profile as profileApi } from '../api/index.js'
-import { rupees, beans, referenceCode } from '../lib/format.js'
+import { profile as profileApi, earnings as earningsApi, calls as callsApi, config as configApi, presence as presenceApi, moderation as moderationApi } from '../api/index.js'
+import { rupees, beans, referenceCode, duration } from '../lib/format.js'
+import logoUrl from '../assets/logo.png'
 import { errorMessage } from '../lib/errors.js'
 import { uploadAvatar } from '../lib/avatar.js'
 import { Skel, SkelGroup, SkelHero, SkelRows, SkelToggles, SkelList, SkelResult } from '../ui/Skeleton.jsx'
 
 /* 39 / 40 — Settings + Profile */
+const compactNum = (n) => (n == null ? '—' : n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n))
+
 export function Settings() {
   const nav = useNavigate()
   const { me, logout } = useAuth()
   const [logoutOpen, setLogoutOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [level, setLevel] = useState(null)
+  const [dash, setDash] = useState(null)
+  const [callsTotal, setCallsTotal] = useState(null)
+  const [primary, setPrimary] = useState(undefined)
+
+  useEffect(() => {
+    profileApi.getLevel().then(setLevel).catch(() => {})
+    earningsApi.dashboard().then(setDash).catch(() => {})
+    callsApi.list('all', 1, 1).then((r) => setCallsTotal(r.total ?? null)).catch(() => {})
+    profileApi.listPayoutMethods().then((res) => setPrimary((res.methods || []).find((m) => m.isPrimary) || res.methods?.[0] || null)).catch(() => setPrimary(null))
+  }, [])
 
   const doLogout = async () => {
     setBusy(true)
@@ -24,44 +38,96 @@ export function Settings() {
     try { await logout() } finally { nav('/login', { replace: true }) }
   }
 
-  const [level, setLevel] = useState(null)
-  useEffect(() => { profileApi.getLevel().then(setLevel).catch(() => {}) }, [])
-
   const name = me?.name || 'Host'
-  const rating = me?.hostProfile?.rating
-  const videoRate = level?.currentPrices.videoRatePerMinutePaise
+  const hp = me?.hostProfile || {}
+  const rating = hp.rating || dash?.rating
+  const videoRate = level?.currentPrices?.videoRatePerMinutePaise
+  const handle = me?.username ? `@${String(me.username).replace(/^@/, '')}` : me?.phone
+  const hostingId = me?.hostingId || (me?.id ? `HST-${String(me.id).replace(/-/g, '').slice(0, 4).toUpperCase()}` : '—')
+  const verified = me?.kycStatus === 'approved'
+  // Lifetime profile stats — read when the backend sends them (requested), "—" until then.
+  const stats = hp.stats || dash?.lifetime || {}
+  const talkSecs = stats.talkTimeSeconds ?? hp.totalTalkTimeSeconds
+  const payoutSub = primary === undefined ? '' : !primary ? 'Add a payout method' : primary.type === 'upi' ? primary.details?.vpa : `${primary.details?.bankName || 'Bank'} •••• ${String(primary.details?.accountNumber || '').slice(-4)}`
+  const kycLabel = (me?.kycStatus || 'not submitted').replace('_', ' ')
 
   return (
     <AppLayout tab="/settings" title="Profile & settings" maxW="xl" bg="canvas" pad={false}>
-      {/* Laptop: profile as a sticky panel on the left, the settings list filling the right. */}
-      <div className="lg:max-w-5xl lg:mx-auto lg:px-8 lg:py-8 lg:grid lg:grid-cols-[300px_1fr] lg:gap-6 lg:items-start">
-        <div className="relative bg-gradient-to-br from-brand-600 to-brand-800 px-5 lg:px-6 pt-3 lg:pt-8 pb-6 lg:pb-7 text-white lg:rounded-3xl lg:sticky lg:top-6 lg:shadow-pop">
-          <div className="flex items-center gap-3 lg:flex-col lg:text-center">
-            <Avatar name={name} size={56} src={me?.avatarUrl} className="ring-2 ring-white/40" />
-            <div>
-              <p className="text-[19px] font-bold flex items-center gap-1.5 lg:justify-center">{name} {me?.kycStatus === 'approved' && <Icon name="shield-check" size={16} className="text-gold-300" />}</p>
-              <p className="text-[12px] text-white/70">{me?.phone}</p>
-              <div className="mt-1.5 flex gap-2 lg:justify-center lg:flex-wrap">
-                <span className="pill bg-black/25 text-white text-[11px]">{rating?.average != null ? rating.average.toFixed(1) : '—'} ★</span>
-                <span className="pill bg-black/25 text-white text-[11px]">{rating?.count ?? 0} ratings</span>
-                {level && <span className="pill bg-gold-400/25 text-gold-200 text-[11px] flex items-center gap-1"><Icon name="crown" size={11} /> Level {level.level}</span>}
+      <div className="lg:max-w-5xl lg:mx-auto lg:px-8 lg:py-8 lg:grid lg:grid-cols-[340px_1fr] lg:gap-6 lg:items-start">
+        <div className="lg:sticky lg:top-6">
+          {/* Profile header */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-brand-800 via-brand-700 to-brand-600 px-5 pt-5 pb-5 text-white lg:rounded-3xl">
+            <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
+            <div className="relative flex items-center gap-4">
+              <Avatar name={name} size={84} src={me?.avatarUrl} className="ring-[3px] ring-white shrink-0" />
+              <div className="min-w-0">
+                <p className="flex items-center gap-1.5 text-[22px] font-bold leading-tight">
+                  <span className="truncate">{name}</span>
+                  {verified && <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-gold-400 text-white"><Icon name="check" size={12} strokeWidth={3} /></span>}
+                </p>
+                <p className="truncate text-[13px] text-white/80">{[handle, (me?.languages || []).join(', ')].filter(Boolean).join(' · ')}</p>
+                <div className="mt-2 flex gap-2">
+                  <span className="pill bg-black/30 text-[12px] font-bold text-white">{rating?.average != null ? rating.average.toFixed(1) : '—'} ★</span>
+                  <span className="pill bg-black/30 text-[12px] font-bold text-white">{callsTotal != null ? `${compactNum(callsTotal)} calls` : `${rating?.count ?? 0} ratings`}</span>
+                </div>
               </div>
             </div>
+            <div className="relative mt-4 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-white/85">
+              <span>Hosting ID · <span className="font-bold text-white">{hostingId}</span></span>
+              <span>·</span>
+              <span className={`font-semibold ${verified ? 'text-emerald-300' : 'text-gold-300'}`}>{verified ? 'Verified' : 'Not verified'}</span>
+              {level && <><span>·</span><span className="pill bg-black/30 text-[12px] font-extrabold text-white"><span aria-hidden>👑</span> LVL {level.level}</span></>}
+            </div>
+          </div>
+
+          {/* Stat cards */}
+          <div className="grid grid-cols-3 gap-3 px-5 pt-4 lg:px-0">
+            {[
+              ['users', 'brand', compactNum(stats.followersCount ?? hp.followersCount), 'Followers'],
+              ['clock', 'brand', talkSecs != null ? duration(talkSecs) : '—', 'Talk time'],
+              ['gift', 'gold', compactNum(stats.giftsReceivedCount ?? hp.giftsReceivedCount), 'Gifts'],
+            ].map(([icon, tone, value, label]) => (
+              <div key={label} className="rounded-2xl border border-black/[.08] bg-white p-3.5 shadow-sm">
+                <IconBadge name={icon} tone={tone} size={32} />
+                <p className="mt-3 text-[20px] font-extrabold text-ink-900">{value}</p>
+                <p className="text-[12px] text-ink-400">{label}</p>
+              </div>
+            ))}
           </div>
         </div>
-        <div className="px-5 lg:px-0 -mt-4 lg:mt-0 pb-4">
-          <SectionTitle className="mt-5 lg:mt-0 mb-1">Account</SectionTitle>
-          <div className="card px-4 divide-y divide-black/5">
-            <Row icon="trending-up" tone="brand" title="Performance" sub="Meter, livestream score & leaderboards" onClick={() => nav('/settings/performance')} />
-            <Row icon="settings" tone="brand" title="Edit profile" sub="Name, bio, languages" onClick={() => nav('/settings/edit-profile')} />
-            <Row icon="image" tone="brand" title="Gallery" sub="Photos & videos" onClick={() => nav('/settings/gallery')} />
-            <Row icon="sparkles" tone="gold" title="Beauty filter" sub="Smooth your camera in calls & live" onClick={() => nav('/settings/beauty-filter')} />
-            <Row icon="crown" tone="gold" title="Host level" sub={level ? `Level ${level.level} of ${level.maxLevel ?? level.levels?.length ?? 20}${level.beansToNextLevel != null ? ` · ${beans(level.beansToNextLevel)} beans to next` : ' · Max level'}` : 'Your level & prices'} onClick={() => nav('/settings/level')} />
-            <Row icon="wallet" tone="gold" title="Rate settings" sub={videoRate ? `${rupees(videoRate)}/min video` : 'Set your rates'} onClick={() => nav('/settings/rates')} />
-            <Row icon="shield-check" tone="green" title="KYC status" sub={me?.kycStatus?.replace('_', ' ')} right={<span className="pill bg-emerald-50 text-emerald-600 text-[11px] capitalize">{me?.kycStatus?.replace('_', ' ')}</span>} onClick={() => nav('/settings/kyc')} />
-            <Row icon="card" tone="brand" title="Payout details" onClick={() => nav('/settings/payouts')} />
+
+        <div className="px-5 lg:px-0 pb-6">
+          <div className="divide-y divide-black/5">
+            <Row icon="user" tone="brand" title="My Profile & Gallery" sub="Name, bio, languages" onClick={() => nav('/settings/edit-profile')} />
+            <Row icon="card" tone="gold" title="Rate settings" sub={videoRate ? `${rupees(videoRate)}/min video` : 'Set your rates'} onClick={() => nav('/settings/rates')} />
+            <Row icon="info" tone="brand" title="KYC Details" sub={<span className="capitalize">{kycLabel}</span>} onClick={() => nav('/settings/kyc')} />
+            <Row icon="wallet" tone="brand" title="Payout details" sub={payoutSub} onClick={() => nav('/settings/payouts')} />
+            <Row icon="receipt" tone="brand" title="My Withdrawals" onClick={() => nav('/settings/withdrawals')} />
+            <Row icon="trending-up" tone="brand" title="My Earnings" onClick={() => nav('/settings/earnings')} />
+            <Row icon="gift" tone="brand" title="Refer and Earn" onClick={() => nav('/settings/refer')} />
+            <Row icon="ban" tone="brand" title="Blocked Users" onClick={() => nav('/settings/blocked')} />
+            <Row icon="globe" tone="brand" title="Languages" sub={(me?.languages || []).join(', ')} onClick={() => nav('/settings/languages')} />
+          </div>
+
+          <SectionTitle className="mt-6 mb-1">Communication</SectionTitle>
+          <div className="divide-y divide-black/5">
             <Row icon="bell" tone="brand" title="Notifications" sub="Calls, gifts, payouts" onClick={() => nav('/settings/notifications')} />
-            <Row icon="help" tone="brand" title="Help & support" onClick={() => nav('/settings/help')} />
+            <Row icon="live" tone="brand" title="Availability" sub="Auto-accept, voice-only hours" onClick={() => nav('/settings/availability')} />
+          </div>
+
+          <SectionTitle className="mt-6 mb-1">Growth</SectionTitle>
+          <div className="divide-y divide-black/5">
+            <Row icon="trending-up" tone="brand" title="Performance" sub="Meter, livestream score & leaderboards" onClick={() => nav('/settings/performance')} />
+            <Row icon="crown" tone="gold" title="Host level" sub={level ? `Level ${level.level}${level.beansToNextLevel != null ? ` · ${beans(level.beansToNextLevel)} beans to next` : ' · Max level'}` : 'Your level & prices'} onClick={() => nav('/settings/level')} />
+            <Row icon="sparkles" tone="gold" title="Beauty filter" sub="Smooth your camera in calls & live" onClick={() => nav('/settings/beauty-filter')} />
+          </div>
+
+          <SectionTitle className="mt-6 mb-1">Support</SectionTitle>
+          <div className="divide-y divide-black/5">
+            <Row icon="chat" tone="brand" title="Chat Bot" sub="Get help instantly" onClick={() => nav('/settings/help/chat')} />
+            <Row icon="info" tone="brand" title="About Us" onClick={() => nav('/settings/about')} />
+            <Row icon="file-text" tone="brand" title="Terms & Policies" onClick={() => nav('/settings/terms')} />
+            <Row icon="lifebuoy" tone="brand" title="Help & Support" onClick={() => nav('/settings/help')} />
             <Row icon="logout" danger title="Logout" onClick={() => setLogoutOpen(true)} />
           </div>
         </div>
@@ -70,12 +136,16 @@ export function Settings() {
       {logoutOpen && (
         <div className="fixed inset-0 z-[70] flex flex-col justify-end lg:justify-center lg:items-center" onClick={() => setLogoutOpen(false)}>
           <div className="absolute inset-0 bg-black/40" />
-          <div className="relative bg-white rounded-t-3xl lg:rounded-2xl lg:max-w-sm w-full p-5 animate-sheet-up" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start gap-3">
-              <span className="grid place-items-center h-11 w-11 rounded-full border-2 border-dashed border-rose-300 text-rose-500 shrink-0"><Icon name="logout" size={18} /></span>
-              <div><p className="text-[17px] font-bold text-ink-900">Logging out?</p><p className="text-[13px] text-ink-400 mt-0.5">You'll stop receiving calls and gifts until you sign back in. Your earnings stay safe.</p></div>
+          <div className="relative bg-white rounded-t-3xl lg:rounded-2xl lg:max-w-sm w-full p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] animate-sheet-up" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-black/10 lg:hidden" />
+            <p className="text-[18px] font-bold text-ink-900">Logging Out ?</p>
+            <div className="mt-3 flex items-center gap-3">
+              <span className="grid place-items-center h-14 w-14 rounded-full bg-rose-50 shrink-0">
+                <span className="grid place-items-center h-10 w-10 rounded-full border-2 border-dashed border-rose-300 text-rose-500"><Icon name="logout" size={18} /></span>
+              </span>
+              <p className="text-[13px] text-ink-500">You'll stop receiving calls and gifts until you sign back in. Your earnings stay safe.</p>
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-5 grid grid-cols-2 gap-3">
               <button onClick={() => setLogoutOpen(false)} className="btn-outline">Cancel</button>
               <button onClick={doLogout} disabled={busy} className="btn-danger-outline disabled:opacity-60"><Icon name="logout" size={16} /> {busy ? 'Logging out…' : 'Log out'}</button>
             </div>
@@ -86,118 +156,202 @@ export function Settings() {
   )
 }
 
-/* 40 — KYC status */
+/* 40 — KYC details */
 export function KycStatus() {
+  const nav = useNavigate()
   const { me } = useAuth()
   const [kyc, setKyc] = useState(null)
+  const [summary, setSummary] = useState(null)
+  const [minBeans, setMinBeans] = useState(null)
   const [err, setErr] = useState('')
-  const load = () => { setErr(''); profileApi.getKycStatus().then(setKyc).catch((e) => setErr(errorMessage(e, 'Could not load your KYC status.'))) }
-  useEffect(load, [])
-  const status = kyc?.kycStatus || 'not_submitted'
-  const tone = status === 'approved' ? 'brand' : status === 'rejected' ? 'rose' : 'gold'
-  const pillTone = status === 'approved' ? 'bg-emerald-50 text-emerald-600' : status === 'rejected' ? 'bg-rose-50 text-rose-500' : 'bg-gold-50 text-gold-600'
-  const ref = referenceCode(kyc, me?.id)
-  // Still fetching — skeleton instead of briefly showing "Not submitted".
-  if (!kyc && !err) {
-    return (
-      <AppLayout tab="/settings" title="KYC status" back bottomNav={false} maxW="md" bg="white">
-        <TopBar title="KYC status" />
-        <SkelGroup className="py-8"><SkelResult /></SkelGroup>
-      </AppLayout>
-    )
+  const load = () => {
+    setErr('')
+    profileApi.getKycStatus().then(setKyc).catch((e) => setErr(errorMessage(e, 'Could not load your KYC status.')))
+    earningsApi.summary().then(setSummary).catch(() => {})
+    // Bean threshold for withdrawing / submitting KYC — admin-configurable, read from /config when the backend sends it.
+    configApi.get().then((c) => setMinBeans(c?.minWithdrawalBeans ?? c?.kycMinBeans ?? null)).catch(() => {})
   }
+  useEffect(load, [])
+  const status = kyc?.kycStatus || me?.kycStatus || 'not_submitted'
+  const ref = referenceCode(kyc, me?.id)
+  const lowBalance = minBeans != null && summary?.beanBalance != null && summary.beanBalance < minBeans
+  const canUpdate = status === 'not_submitted' || status === 'rejected'
+  const look = {
+    approved: ['shield-check', 'text-emerald-600 bg-emerald-50', 'Identity verified', 'Your KYC is approved. You can withdraw your earnings.'],
+    pending: ['clock', 'text-gold-600 bg-gold-50', 'Under review', 'We are checking your documents. This usually takes 1–2 business days.'],
+    rejected: ['alert', 'text-rose-500 bg-rose-50', 'Verification rejected', kyc?.rejectionReason || 'Please submit your documents again.'],
+    not_submitted: ['shield-check', 'text-brand-700 bg-brand-50', 'KYC not submitted', 'Submit your ID and payout details to start withdrawing.'],
+  }[status] || ['shield-check', 'text-brand-700 bg-brand-50', status.replace('_', ' '), '']
+
   return (
-    <AppLayout tab="/settings" title="KYC status" back bottomNav={false} maxW="md" bg="white">
-      <TopBar title="KYC status" />
-      <div className="py-8">
-        <ErrorCard message={err} onRetry={load} className="mx-5" />
-        <ResultScreen tone={tone} icon="shield-check" title={status === 'approved' ? 'Identity verified' : status === 'rejected' ? 'Verification rejected' : status === 'pending' ? 'Under review' : 'Not submitted'}>
-          <span className={`mx-auto pill ${pillTone} text-[12px] -mt-3 capitalize`}><span className="h-1.5 w-1.5 rounded-full bg-current" /> {status.replace('_', ' ')}</span>
-          {status !== 'not_submitted' && <ReferenceRow value={ref} label="Application ID" />}
-          {kyc?.rejectionReason && <p className="text-[13px] text-rose-500 text-center">{kyc.rejectionReason}</p>}
-          <div className="card p-4 text-left mt-2">
-            {(kyc?.documents || []).length === 0 && <p className="text-[13px] text-ink-400 py-2">No documents submitted yet.</p>}
-            {(kyc?.documents || []).map((d) => (
-              <div key={d.documentType} className="flex items-center justify-between py-2 text-[14px]">
-                <span className="text-ink-500 capitalize">{d.documentType.replace('_', ' ')}</span>
-                <span className="font-semibold text-ink-900 flex items-center gap-1.5">Uploaded <Icon name="check" size={14} className="text-emerald-500" /></span>
-              </div>
-            ))}
+    <AppLayout tab="/settings" title="KYC details" back bottomNav={false} maxW="md" bg="canvas">
+      <TopBar title="KYC Details" />
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8 space-y-3">
+        <ErrorCard message={err} onRetry={load} />
+        {lowBalance && (
+          <div className="flex gap-3 rounded-2xl border border-rose-300 bg-rose-50/60 px-4 py-3.5">
+            <Icon name="info" size={22} className="shrink-0 text-rose-600" />
+            <div>
+              <p className="text-[13px] font-bold uppercase text-rose-600">Note</p>
+              <p className="text-[13px] text-rose-600">Your balance is lower than the withdrawal limit of {beans(minBeans)} beans. Please submit your KYC when you have sufficient balance to withdraw.</p>
+            </div>
           </div>
-        </ResultScreen>
+        )}
+        {!kyc && !err ? <SkelGroup><SkelResult /></SkelGroup> : (
+          <div className="flex flex-col items-center rounded-2xl border border-black/[.08] bg-white px-5 py-7 text-center">
+            <span className={`grid h-16 w-16 place-items-center rounded-full ${look[1]}`}><Icon name={look[0]} size={30} /></span>
+            <p className="mt-3 text-[18px] font-semibold capitalize text-ink-900">{look[2]}</p>
+            {look[3] && <p className="mt-1 max-w-xs text-[13px] text-ink-500">{look[3]}</p>}
+            {status !== 'not_submitted' && <div className="mt-3 w-full"><ReferenceRow value={ref} label="Application ID" /></div>}
+            {(kyc?.documents || []).length > 0 && (
+              <div className="mt-3 w-full divide-y divide-black/5 text-left">
+                {kyc.documents.map((d) => (
+                  <div key={d.documentType} className="flex items-center justify-between py-2 text-[14px]">
+                    <span className="capitalize text-ink-500">{d.documentType.replace('_', ' ')}</span>
+                    <span className="flex items-center gap-1.5 font-semibold text-ink-900">Uploaded <Icon name="check" size={14} className="text-emerald-500" /></span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {canUpdate && <button onClick={() => nav('/onboarding/kyc')} className="btn-primary !mt-6">Update KYC</button>}
       </div>
     </AppLayout>
   )
 }
 
-/* 40 — Edit profile */
+/* 40 — Edit profile: Profile (photo, details, interest chips) + My gallery tabs */
+const INTEREST_GROUPS = [
+  ['interests', 'Interests', ['Pets', 'Self-Improvement', 'Life & Emotions', 'Mental Wellness', 'Movies & Celebs', 'Fashion', 'Fitness', 'Spirituality']],
+  ['hobbies', 'Hobbies', ['Cooking', 'Binge watching', 'Dancing', 'Singing', 'Reading', 'Gaming', 'Photography', 'Art']],
+  ['sports', 'Sports', ['Badminton', 'Cricket', 'Football', 'Yoga', 'Gym', 'Running', 'Swimming']],
+  ['film', 'Film', ['Thriller', 'Bollywood', 'Romance', 'Comedy', 'Horror', 'Action', 'K-Drama']],
+  ['music', 'Music', ['Rock', 'Classical', 'Bollywood', 'Pop', 'Hip-hop', 'Devotional', 'Indie']],
+  ['traveling', 'Traveling', ['Beaches', 'Luxury', 'National Parks', 'Islands', 'Mountains', 'Road trips', 'Heritage']],
+  ['food', 'Food', ['Biryani', 'Burger', 'Dosa', 'Pav Bhaji', 'Pizza', 'Chinese', 'Desserts']],
+]
+
+function Chip({ label, on, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3.5 py-1.5 text-[12px] font-semibold transition ${on ? 'bg-brand-100 text-brand-700' : 'border border-black/10 bg-white text-ink-400'}`}
+    >
+      {label}
+    </button>
+  )
+}
+
 export function EditProfile() {
-  const nav = useNavigate()
   const { me, setMe } = useAuth()
+  const hp = me?.hostProfile || {}
+  const [tab, setTab] = useState('profile')
   const [name, setName] = useState(me?.name || '')
   const [email, setEmail] = useState(me?.email || '')
-  const [bio, setBio] = useState(me?.hostProfile?.bio || '')
-  const [languages, setLanguages] = useState((me?.languages || []).join(', '))
+  const [bio, setBio] = useState(hp.bio || '')
+  const [languages] = useState(me?.languages || [])
+  const [picks, setPicks] = useState(() => {
+    const src = hp.interests && typeof hp.interests === 'object' && !Array.isArray(hp.interests) ? hp.interests : {}
+    return Object.fromEntries(INTEREST_GROUPS.map(([key]) => [key, new Set(src[key] || [])]))
+  })
   const [avatarFile, setAvatarFile] = useState(null)
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [saved, setSaved] = useState(false)
   const avatarInputRef = useRef(null)
+  const nav = useNavigate()
 
   const pickAvatar = (file) => {
     if (!file) return
     setAvatarFile(file)
     setAvatarPreviewUrl(URL.createObjectURL(file))
   }
+  const toggle = (key, label) => setPicks((p) => {
+    const next = new Set(p[key])
+    next.has(label) ? next.delete(label) : next.add(label)
+    return { ...p, [key]: next }
+  })
 
   const save = async () => {
     setBusy(true)
     setErr('')
+    setSaved(false)
     try {
-      const langs = languages.split(',').map((s) => s.trim()).filter(Boolean)
       const avatarUrl = avatarFile ? await uploadAvatar(avatarFile) : undefined
-      const updated = await profileApi.updateMe({ name: name.trim(), email: email.trim() || undefined, avatarUrl, languages: langs })
-      await profileApi.updateHostProfile({ bio: bio.trim() || undefined, languages: langs })
-      setMe({ ...updated, hostProfile: { ...me?.hostProfile, bio, languages: langs } })
-      nav(-1)
+      const updated = await profileApi.updateMe({ name: name.trim(), email: email.trim() || undefined, avatarUrl })
+      const interests = Object.fromEntries(Object.entries(picks).map(([k, s]) => [k, [...s]]))
+      const updatedHp = await profileApi.updateHostProfile({ bio: bio.trim() || undefined, interests })
+      setMe({ ...me, ...updated, hostProfile: { ...me?.hostProfile, ...updatedHp, interests } })
+      setAvatarFile(null)
+      setSaved(true)
     } catch (e) {
-      setErr(errorMessage(e, 'Could not save changes.'))
+      setErr(errorMessage(e, 'Could not save profile.'))
     } finally {
       setBusy(false)
     }
   }
 
+  const handle = me?.username ? `@${String(me.username).replace(/^@/, '')}` : me?.phone
+  const dob = me?.dateOfBirth || me?.dob
+  const saveBtn = <button onClick={save} disabled={busy} className="rounded-xl bg-brand-600 px-4 py-2 text-[14px] font-bold text-white disabled:opacity-60">{busy ? 'Saving…' : 'Save'}</button>
+
   return (
     <AppLayout tab="/settings" title="Edit profile" back bottomNav={false} maxW="lg" bg="white">
-      <TopBar title="Edit profile" right={<button onClick={save} disabled={busy} className="rounded-xl bg-brand-600 text-white px-4 py-2 text-[14px] font-semibold disabled:opacity-60">{busy ? 'Saving…' : 'Save'}</button>} />
-      {/* Laptop: photo card on the left, the form in a card on the right. */}
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 lg:grid lg:grid-cols-[240px_1fr] lg:gap-6 lg:items-start">
-        <div className="flex flex-col items-center lg:card lg:p-6 lg:sticky lg:top-6">
-          <button type="button" onClick={() => avatarInputRef.current?.click()} className="relative">
-            <Avatar name={name || 'Host'} size={88} src={avatarPreviewUrl || me?.avatarUrl} className="ring-4 ring-brand-500/30" />
-            <span className="absolute bottom-0 right-0 h-7 w-7 grid place-items-center rounded-full bg-brand-600 text-white"><Icon name="camera" size={13} /></span>
+      <TopBar title="Edit profile" right={tab === 'profile' ? saveBtn : null} />
+      <div className="px-5 lg:px-0 pt-5 lg:pt-0 pb-8">
+        <div className="flex items-center gap-4">
+          <button type="button" onClick={() => avatarInputRef.current?.click()} className="relative shrink-0" aria-label="Change photo">
+            <Avatar name={name || 'Host'} size={84} src={avatarPreviewUrl || me?.avatarUrl} />
+            <span className="absolute bottom-0 right-0 grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-brand-600 text-white"><Icon name="camera" size={13} /></span>
           </button>
-          <input
-            ref={avatarInputRef}
-            type="file"
-            accept="image/jpeg,image/png"
-            capture="user"
-            hidden
-            onChange={(e) => pickAvatar(e.target.files?.[0] || null)}
-          />
-          <p className="hidden lg:block mt-3 text-[15px] font-bold text-ink-900 text-center truncate max-w-full">{name || 'Host'}</p>
-          <button type="button" onClick={() => avatarInputRef.current?.click()} className="hidden lg:block mt-1 text-[12px] font-semibold text-brand-600">Change photo</button>
-        </div>
-        <div>
-          <div className="mt-4 space-y-3.5 lg:mt-0 lg:card lg:p-6 lg:grid lg:grid-cols-2 lg:gap-4 lg:space-y-0">
-            <div><span className="label">Display name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
-            <div><span className="label">E-mail</span><input className="input" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-            <div className="lg:col-span-2"><span className="label">Bio</span><input className="input" value={bio} onChange={(e) => setBio(e.target.value)} /></div>
-            <div className="lg:col-span-2"><span className="label">Languages</span><input className="input" value={languages} onChange={(e) => setLanguages(e.target.value)} placeholder="Hindi, English" /></div>
+          <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png" hidden onChange={(e) => pickAvatar(e.target.files?.[0] || null)} />
+          <div className="min-w-0">
+            <p className="truncate text-[22px] font-bold text-ink-900">{name || 'Host'}</p>
+            <p className="text-[13px] text-ink-400">{[handle, dob ? new Date(dob).toLocaleDateString('en-GB') : null].filter(Boolean).join(' · ')}</p>
           </div>
-          <ErrorCard message={err} compact className="mt-3" />
-          <button onClick={save} disabled={busy} className="btn-primary mt-4 lg:hidden disabled:opacity-60">{busy ? 'Saving…' : 'Save changes'}</button>
         </div>
+
+        <div className="mt-6 grid grid-cols-2 border-b border-black/10">
+          {[['profile', 'Profile'], ['gallery', 'My Gallery']].map(([k, l]) => (
+            <button key={k} onClick={() => setTab(k)} className={`py-3 text-[13px] font-semibold ${tab === k ? 'border-b-2 border-brand-600 bg-brand-50 text-brand-700' : 'text-ink-900'}`}>{l}</button>
+          ))}
+        </div>
+
+        {tab === 'gallery' ? <div className="pt-4"><GalleryPanel /></div> : (
+          <div className="pt-4 space-y-4">
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div><span className="label">Display name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
+              <div><span className="label">E-mail</span><input className="input" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+              <div className="lg:col-span-2"><span className="label">Bio</span><textarea className="input min-h-[80px] py-2.5" value={bio} maxLength={300} onChange={(e) => setBio(e.target.value)} placeholder="A few words about you" /></div>
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[13px] text-ink-500">Languages</p>
+                <button onClick={() => nav('/settings/languages')} className="text-[12px] font-semibold text-brand-600">Edit</button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {languages.length ? languages.map((l) => <Chip key={l} label={l} on onClick={() => nav('/settings/languages')} />) : <Chip label="Add languages" on={false} onClick={() => nav('/settings/languages')} />}
+              </div>
+            </div>
+
+            {INTEREST_GROUPS.map(([key, label, options]) => (
+              <div key={key}>
+                <p className="mb-2 text-[13px] text-ink-500">{label}</p>
+                <div className="flex flex-wrap gap-2">
+                  {options.map((o) => <Chip key={o} label={o} on={picks[key].has(o)} onClick={() => toggle(key, o)} />)}
+                </div>
+              </div>
+            ))}
+
+            <ErrorCard message={err} compact />
+            {saved && <p className="text-[13px] font-semibold text-emerald-600">Profile saved</p>}
+            <button onClick={save} disabled={busy} className="btn-primary disabled:opacity-60">{busy ? 'Saving…' : 'Save changes'}</button>
+          </div>
+        )}
       </div>
     </AppLayout>
   )
@@ -359,6 +513,7 @@ export function RateSettings() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [saved, setSaved] = useState(false)
+  const [editing, setEditing] = useState(false)
 
   useEffect(() => { profileApi.getLevel().then(setLevel).catch(() => {}) }, [])
   const max = level?.maxPrices
@@ -394,6 +549,8 @@ export function RateSettings() {
       })
       setMe({ ...me, hostProfile: { ...me?.hostProfile, ...updated } })
       setSaved(true)
+      setEditing(false)
+      profileApi.getLevel().then(setLevel).catch(() => {}) // refresh the rates shown on the level card
     } catch (e) {
       setErr(errorMessage(e, 'Could not save rates.'))
     } finally {
@@ -403,17 +560,92 @@ export function RateSettings() {
 
   const hint = (cap) => (cap != null ? `Up to ${rupees(cap)} at Level ${level.level} · leave empty to use ${rupees(cap)}` : '')
 
+  // What callers pay right now: the host's own rate if set, otherwise the level price.
+  const videoNow = level?.currentPrices?.videoRatePerMinutePaise ?? hp?.ratePerMinutePaise
+  const voiceNow = level?.currentPrices?.voiceRatePerMinutePaise ?? hp?.voiceRatePerMinutePaise
+
   return (
     <AppLayout tab="/settings" title="Rate settings" back bottomNav={false} maxW="lg" bg="canvas">
       <TopBar title="Rate settings" />
-      {/* Laptop: level note across the top, per-minute rates left, message price + availability right. */}
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4 lg:grid lg:grid-cols-2 lg:gap-x-6 lg:items-start">
-        {level && (
-          <div className="card p-3.5 mb-4 flex items-center gap-3 lg:col-span-2">
-            <span className="grid place-items-center h-10 w-10 rounded-xl bg-gold-50 text-gold-500"><Icon name="crown" size={18} /></span>
-            <p className="flex-1 text-[13px] text-ink-500">You're at <span className="font-bold text-ink-900">Level {level.level}</span>. Your maximum prices go up by ₹20 with every level you earn.</p>
-          </div>
-        )}
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8 lg:grid lg:grid-cols-[380px_1fr] lg:gap-6 lg:items-start">
+        {/* My level card */}
+        <div className="lg:sticky lg:top-6">
+          {!level ? (
+            <SkelGroup><SkelHero height="h-56" /></SkelGroup>
+          ) : (
+            <div className="relative overflow-hidden rounded-[28px] bg-[#120a24] p-5 text-white shadow-lg">
+              <div className="pointer-events-none absolute -left-10 -top-16 h-56 w-56 rounded-full bg-brand-600/50 blur-3xl" />
+              <div className="pointer-events-none absolute -right-12 bottom-0 h-40 w-40 rounded-full bg-fuchsia-600/30 blur-3xl" />
+              <div className="relative">
+                <div className="flex items-center gap-2.5">
+                  <p className="text-[20px] font-semibold">My Level —</p>
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[13px] font-extrabold ring-1 ring-white/10">
+                    <span aria-hidden>👑</span> LVL {level.level}
+                  </span>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  {[['Video Call Rate', videoNow], ['Audio Call Rate', voiceNow]].map(([label, v]) => (
+                    <div key={label} className="rounded-2xl border border-white/15 bg-white/[.04] px-3 py-3.5 text-center">
+                      <p className="text-[12px] text-white/70">{label}</p>
+                      <p className="mt-1 text-[18px] font-extrabold text-gold-400">{v != null ? `${rupees(v)}/min` : '—'}</p>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => { setSaved(false); setErr(''); setEditing(true) }} className="mt-4 h-12 w-full rounded-xl bg-brand-600 text-[15px] font-bold text-white transition hover:bg-brand-500 active:scale-[.99]">
+                  Change call rate
+                </button>
+                {saved && <p className="mt-2 text-center text-[12px] font-semibold text-emerald-300">Rates saved</p>}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Level table — current level ticked, higher levels faded */}
+        <div className="mt-5 lg:mt-0">
+          {!level ? (
+            <SkelGroup><SkelList rows={8} avatar={false} /></SkelGroup>
+          ) : (
+            <div className="overflow-hidden rounded-2xl border border-black/[.07] bg-white">
+              <div className="grid grid-cols-[1fr_1fr_1fr_1fr_44px] items-center bg-black/[.03] px-4 py-3 text-[12px] text-ink-400">
+                <span>Level</span><span>Video</span><span>Voice</span><span>Message</span><span />
+              </div>
+              {level.levels?.map((l) => {
+                const current = l.level === level.level
+                const locked = l.level > level.level
+                return (
+                  <div
+                    key={l.level}
+                    className={`grid grid-cols-[1fr_1fr_1fr_1fr_44px] items-center border-t border-black/[.06] px-4 py-3.5 text-[13px] ${current ? 'bg-brand-100/70 font-bold text-ink-900' : locked ? 'text-ink-300' : 'font-semibold text-ink-900'}`}
+                  >
+                    <span>Lv {l.level}</span>
+                    <span>{rupees(l.videoRatePerMinutePaise)}</span>
+                    <span>{rupees(l.voiceRatePerMinutePaise)}</span>
+                    <span>{rupees(l.messageRatePaise)}</span>
+                    <span className="flex justify-end">
+                      {current ? (
+                        <span className="grid h-6 w-6 place-items-center rounded-md bg-brand-600 text-white"><Icon name="check" size={14} /></span>
+                      ) : (
+                        <span className={`h-6 w-6 rounded-md border-[1.5px] ${locked ? 'border-black/10' : 'border-brand-200'}`} />
+                      )}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {level && <p className="mt-2 px-1 text-[12px] text-ink-400">Maximum price per minute (video, voice) and per message at each level. You move up automatically as you earn.</p>}
+        </div>
+      </div>
+
+      {/* Change call rate — bottom sheet with the rate form */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 animate-fade-in lg:items-center" onClick={() => setEditing(false)}>
+          <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-canvas p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:rounded-3xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-black/10 lg:hidden" />
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-[18px] font-extrabold text-ink-900">Change call rate</p>
+              <button onClick={() => setEditing(false)} className="grid h-9 w-9 place-items-center rounded-full bg-black/5 text-ink-500" aria-label="Close"><Icon name="x" size={16} /></button>
+            </div>
         <div>
         <SectionTitle className="mb-2">Per-minute rates (₹)</SectionTitle>
         <div className="card p-4 space-y-3.5">
@@ -443,18 +675,26 @@ export function RateSettings() {
           <div className="flex items-center gap-3 pt-3"><span className="flex-1 text-[15px] font-semibold text-ink-900">Voice calls only after 12 AM</span><Toggle on={night} onChange={setNight} /></div>
         </div>
         </div>
-        <div className="lg:col-span-2 lg:flex lg:items-center lg:justify-end lg:gap-4">
-          <ErrorCard message={err} compact className="mt-3 lg:flex-1" />
-          {saved && <p className="mt-3 text-[13px] font-semibold text-emerald-600">Rates saved</p>}
-          <button onClick={save} disabled={busy} className="btn-primary mt-4 lg:w-auto lg:px-10 disabled:opacity-60">{busy ? 'Saving…' : 'Save rates'}</button>
+        <ErrorCard message={err} compact className="mt-3" />
+        <button onClick={save} disabled={busy} className="btn-primary mt-4 disabled:opacity-60">{busy ? 'Saving…' : 'Save rates'}</button>
+          </div>
         </div>
-      </div>
+      )}
     </AppLayout>
   )
 }
 
 /* 41 — Gallery */
 export function Gallery() {
+  return (
+    <AppLayout tab="/settings" title="Gallery" back bottomNav={false} maxW="lg" bg="white">
+      <TopBar title="Gallery" />
+      <div className="px-5 lg:px-0 pt-3 lg:pt-0"><GalleryPanel /></div>
+    </AppLayout>
+  )
+}
+
+export function GalleryPanel() {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [f, setF] = useState('All')
@@ -521,9 +761,8 @@ export function Gallery() {
   }
 
   return (
-    <AppLayout tab="/settings" title="Gallery" back bottomNav={false} maxW="lg" bg="white">
-      <TopBar title="Gallery" sub={`${items.length} items`} />
-      <div className="px-5 lg:px-0 pt-3 lg:pt-0 pb-4">
+    <>
+      <div className="pb-4">
         <div className="flex gap-2">
           {['All', 'Photos', 'Videos'].map((c) => (
             <button key={c} onClick={() => setF(c)} className={`rounded-full px-4 py-1.5 text-[13px] font-semibold ${f === c ? 'bg-brand-600 text-white' : 'bg-black/5 text-ink-400'}`}>{c}</button>
@@ -614,7 +853,7 @@ export function Gallery() {
           </div>
         </div>
       )}
-    </AppLayout>
+    </>
   )
 }
 
@@ -624,32 +863,56 @@ export function PayoutDetails() {
   const [methods, setMethods] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const [menu, setMenu] = useState(null)
 
   const load = () => { setErr(''); profileApi.listPayoutMethods().then((res) => setMethods(res.methods || [])).catch((e) => setErr(errorMessage(e, 'Could not load your payout methods.'))).finally(() => setLoading(false)) }
   useEffect(load, [])
 
   const makePrimary = async (id) => {
+    setMenu(null)
     try { await profileApi.setPrimaryPayoutMethod(id); load() } catch (e) { setErr(errorMessage(e, 'Could not update your primary method.')) }
   }
+  const sorted = [...methods].sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+  const title = (m) => (m.type === 'upi' ? m.details?.vpa : `${m.details?.bankName || 'Bank'} •••• ${String(m.details?.accountNumber || '').slice(-4)}`)
+  const sub = (m) => (m.type === 'upi' ? `UPI · ${m.isPrimary ? 'Primary' : 'Backup'}` : `${m.details?.accountHolderName || 'Bank account'} · ${m.isPrimary ? 'Primary' : 'Backup'}`)
 
   return (
     <AppLayout tab="/settings" title="Payout details" back bottomNav={false} maxW="md" bg="canvas">
       <TopBar title="Payout details" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-4">
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8">
         {loading && <SkelGroup><SkelRows rows={2} /></SkelGroup>}
         <ErrorCard message={err} onRetry={load} className="mb-3" />
-        {!loading && !err && methods.length === 0 && <p className="text-[13px] text-ink-400 text-center py-4">No payout methods yet.</p>}
-        {methods.map((m) => (
-          <button key={m.id} onClick={() => !m.isPrimary && makePrimary(m.id)} className="card p-4 flex items-center gap-3 mt-3 w-full text-left first:mt-0">
-            <IconBadge name={m.type === 'upi' ? 'wallet' : 'card'} tone="brand" size={44} />
-            <div className="flex-1">
-              <p className="text-[15px] font-semibold text-ink-900">{m.type === 'upi' ? m.details?.vpa : `${m.details?.accountHolderName || 'Bank'} •••• ${String(m.details?.accountNumber || '').slice(-4)}`}</p>
-              <p className="text-[12px] text-ink-400">{m.type === 'upi' ? 'UPI' : 'Bank transfer'} · {m.isPrimary ? 'Primary' : 'Backup'}</p>
+        {!loading && !err && methods.length === 0 && <p className="py-4 text-center text-[13px] text-ink-400">No payout methods yet.</p>}
+        <div className="space-y-3">
+          {sorted.map((m) => (
+            <div key={m.id} className="relative flex items-center gap-3 rounded-2xl border border-black/[.06] bg-white p-4 shadow-sm">
+              <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-xl ${m.isPrimary ? 'bg-gradient-to-br from-brand-500 to-brand-700 text-white' : 'bg-blue-50 text-blue-600'}`}>
+                <Icon name={m.type === 'upi' ? 'wallet' : 'card'} size={22} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[16px] font-bold text-ink-900">{title(m)}</p>
+                <p className="truncate text-[13px] text-ink-400">{sub(m)}</p>
+              </div>
+              {m.isPrimary ? (
+                <span className="pill bg-emerald-50 text-[12px] font-semibold text-emerald-600"><span className="h-1.5 w-1.5 rounded-full bg-current" /> {m.isVerified === false ? 'Primary' : 'Verified'}</span>
+              ) : (
+                <button onClick={() => setMenu(menu === m.id ? null : m.id)} className="grid h-9 w-9 place-items-center rounded-full text-ink-500 hover:bg-black/5" aria-label="More"><Icon name="more-vertical" size={18} /></button>
+              )}
+              {menu === m.id && (
+                <div className="absolute right-4 top-14 z-10 w-44 overflow-hidden rounded-xl border border-black/10 bg-white shadow-lg">
+                  <button onClick={() => makePrimary(m.id)} className="block w-full px-4 py-3 text-left text-[14px] font-medium text-ink-900 hover:bg-black/[.03]">Make primary</button>
+                </div>
+              )}
             </div>
-            {m.isPrimary && <span className="pill bg-emerald-50 text-emerald-600 text-[11px]"><span className="h-1.5 w-1.5 rounded-full bg-current" /> Primary</span>}
-          </button>
-        ))}
-        <button onClick={() => nav('/settings/payouts/add')} className="btn-outline mt-4"><Icon name="plus" size={16} /> Add payout method</button>
+          ))}
+        </div>
+
+        <SectionTitle className="mt-6 mb-1">Payout schedule</SectionTitle>
+        <div className="divide-y divide-black/5">
+          <Row icon="clock" tone="brand" title="Processing time" sub="2–3 business days after you withdraw" right={<span />} />
+          <Row icon="wallet" tone="gold" title="Minimum amount" sub="₹ 10 per withdrawal" right={<span />} />
+        </div>
+        <button onClick={() => nav('/settings/payouts/add')} className="btn-outline mt-4 bg-white"><Icon name="plus" size={16} /> Add payout method</button>
       </div>
     </AppLayout>
   )
@@ -683,19 +946,18 @@ export function NotificationSettings() {
 
   return (
     <AppLayout tab="/settings" title="Notification settings" back bottomNav={false} maxW="xl" bg="canvas">
-      <TopBar title="Notification settings" />
-      {/* Laptop: the three groups side by side. */}
+      <TopBar title="Notification Settings" />
       <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 space-y-5 lg:space-y-0 lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
         {!prefs && !err && [4, 4, 3].map((n, i) => <SkelGroup key={i}><Skel className="h-3 w-24 rounded-md mb-2" /><SkelToggles rows={n} /></SkelGroup>)}
         <ErrorCard message={err} onRetry={load} className="lg:col-span-3" />
         <ErrorCard message={saveErr} compact className="lg:col-span-3" />
         {prefs && PREF_FIELDS.map(([g, rows]) => (
           <div key={g}>
-            <SectionTitle className="mb-2">{g}</SectionTitle>
-            <div className="card p-4 divide-y divide-black/5">
+            <SectionTitle className="mb-2 !font-bold">{g}</SectionTitle>
+            <div className="rounded-2xl border border-black/[.06] bg-white px-4 py-1 shadow-sm">
               {rows.map(([key, label]) => (
-                <div key={key} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
-                  <span className="flex-1 text-[15px] font-medium text-ink-900">{label}</span>
+                <div key={key} className="flex items-center gap-3 py-2.5">
+                  <span className="flex-1 text-[15px] font-semibold text-ink-900">{label}</span>
                   <Toggle on={!!prefs[key]} onChange={(v) => update(key, v)} />
                 </div>
               ))}
@@ -708,29 +970,210 @@ export function NotificationSettings() {
 }
 
 /* 43 — Help & support */
+const HELP_TOPICS = [
+  ['wallet', 'gold', 'Why is my withdrawal pending?', 'Withdrawals are processed in 2–3 business days. Your KYC must be approved and you need a payout method on file. You can follow each request in My Withdrawals.'],
+  ['shield', 'green', 'KYC document guidelines', 'Upload a clear photo of a government ID (front and back) where your name and photo are easy to read. Blurry, cropped or expired documents are rejected.'],
+  ['phone', 'brand', 'Improving call quality', 'Use Wi-Fi or a strong 4G/5G signal, face a light source, and keep the app open during calls. The beauty filter can also help in low light.'],
+  ['flag', 'rose', 'Reporting an abusive user', 'During or after a call, open the user’s options and choose Report or Block. Our team reviews every report. Blocked users can’t call or message you.'],
+]
+
 export function HelpSupport() {
-  const topics = [
-    ['wallet', 'gold', 'Why is my withdrawal pending?'],
-    ['shield', 'green', 'KYC document guidelines'],
-    ['phone', 'brand', 'Improving call quality'],
-    ['flag', 'rose', 'Reporting an abusive user'],
-  ]
+  const nav = useNavigate()
+  const [open, setOpen] = useState(null)
   return (
     <AppLayout tab="/settings" title="Help & support" back bottomNav={false} maxW="lg" bg="canvas">
       <TopBar title="Help & support" />
-      {/* Laptop: topics and legal side by side. */}
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-6 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8 lg:grid lg:grid-cols-2 lg:gap-6 lg:items-start">
         <div>
-          <SectionTitle className="mb-1">Popular topics</SectionTitle>
-          <div className="card px-4 divide-y divide-black/5">{topics.map(([i, t, l]) => <Row key={l} icon={i} tone={t} title={l} />)}</div>
-        </div>
-        <div>
-          <SectionTitle className="mt-5 lg:mt-0 mb-1">Legal</SectionTitle>
-          <div className="card px-4 divide-y divide-black/5">
-            <Row icon="file-text" tone="brand" title="Terms of service" />
-            <Row icon="file-text" tone="brand" title="Privacy policy" />
+          <div className="rounded-2xl border border-black/[.06] bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-brand-50">
+                <span className="grid h-10 w-10 place-items-center rounded-full border-2 border-dashed border-brand-300 text-brand-600"><Icon name="lifebuoy" size={18} /></span>
+              </span>
+              <div>
+                <p className="text-[16px] font-bold text-ink-900">Talk to us</p>
+                <p className="text-[13px] text-ink-400">Message our support team</p>
+              </div>
+            </div>
+            <button onClick={() => nav('/settings/help/chat')} className="btn-primary mt-4">Start a chat</button>
+          </div>
+
+          <SectionTitle className="mt-6 mb-1">Popular topics</SectionTitle>
+          <div className="divide-y divide-black/5">
+            {HELP_TOPICS.map(([icon, tone, q, a], i) => (
+              <div key={q}>
+                <Row icon={icon} tone={tone} title={q} onClick={() => setOpen(open === i ? null : i)} right={<Icon name={open === i ? 'chevron-down' : 'chevron-right'} size={18} className="text-ink-700" />} />
+                {open === i && <p className="-mt-1 pb-3.5 pl-[54px] text-[13px] leading-relaxed text-ink-500">{a}</p>}
+              </div>
+            ))}
           </div>
         </div>
+        <div>
+          <SectionTitle className="mt-6 lg:mt-0 mb-1">Legal</SectionTitle>
+          <div className="divide-y divide-black/5">
+            <Row icon="file-text" tone="brand" title="Terms of service" onClick={() => nav('/settings/terms')} />
+            <Row icon="file-text" tone="brand" title="Privacy policy" onClick={() => nav('/settings/terms#privacy')} />
+          </div>
+        </div>
+      </div>
+    </AppLayout>
+  )
+}
+
+/* Availability — online status and how calls reach the host. */
+export function Availability() {
+  const { me, setMe } = useAuth()
+  const hp = me?.hostProfile || {}
+  const [online, setOnline] = useState(null)
+  const [auto, setAuto] = useState(hp.autoAcceptCalls ?? true)
+  const [night, setNight] = useState(hp.voiceCallsOnlyAfterMidnight ?? false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => { earningsApi.dashboard().then((d) => setOnline(!!d?.isOnline)).catch(() => {}) }, [])
+
+  const setPresence = async (v) => {
+    const prev = online
+    setOnline(v)
+    setErr('')
+    try { await presenceApi.setOnline(v) } catch (e) { setOnline(prev); setErr(errorMessage(e, 'Could not update your status.')) }
+  }
+  const savePref = async (key, value, setter, prev) => {
+    setter(value)
+    setErr('')
+    try {
+      const updated = await profileApi.updateHostProfile({ [key]: value })
+      setMe({ ...me, hostProfile: { ...me?.hostProfile, ...updated } })
+    } catch (e) {
+      setter(prev)
+      setErr(errorMessage(e, 'Could not save that change.'))
+    }
+  }
+
+  return (
+    <AppLayout tab="/settings" title="Availability" back bottomNav={false} maxW="md" bg="canvas">
+      <TopBar title="Availability" />
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8 space-y-5">
+        <ErrorCard message={err} compact />
+        <div>
+          <SectionTitle className="mb-2 !font-bold">Status</SectionTitle>
+          <div className="rounded-2xl border border-black/[.06] bg-white px-4 py-3 shadow-sm flex items-center gap-3">
+            <span className="flex-1">
+              <span className="block text-[15px] font-semibold text-ink-900">{online ? 'Online' : 'Offline'}</span>
+              <span className="block text-[12px] text-ink-400">{online ? 'Users can call you now' : 'Users can’t call you right now'}</span>
+            </span>
+            {online === null ? <Skel className="h-7 w-12 rounded-full" /> : <Toggle on={online} onChange={setPresence} />}
+          </div>
+        </div>
+        <div>
+          <SectionTitle className="mb-2 !font-bold">Calls</SectionTitle>
+          <div className="rounded-2xl border border-black/[.06] bg-white px-4 py-1 shadow-sm">
+            <div className="flex items-center gap-3 py-2.5">
+              <span className="flex-1"><span className="block text-[15px] font-semibold text-ink-900">Auto-accept calls</span><span className="block text-[12px] text-ink-400">Connect incoming calls without tapping Accept</span></span>
+              <Toggle on={auto} onChange={(v) => savePref('autoAcceptCalls', v, setAuto, auto)} />
+            </div>
+            <div className="flex items-center gap-3 border-t border-black/5 py-2.5">
+              <span className="flex-1"><span className="block text-[15px] font-semibold text-ink-900">Voice calls only after 12 AM</span><span className="block text-[12px] text-ink-400">Video calls are turned off late at night</span></span>
+              <Toggle on={night} onChange={(v) => savePref('voiceCallsOnlyAfterMidnight', v, setNight, night)} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </AppLayout>
+  )
+}
+
+/* Blocked users — everyone the host has blocked, with unblock. */
+export function BlockedUsers() {
+  const [list, setList] = useState(null)
+  const [err, setErr] = useState('')
+  const [busyId, setBusyId] = useState(null)
+  const load = () => {
+    setErr('')
+    moderationApi.listBlocked().then((res) => setList(res.blocks || res.blocked || res.items || (Array.isArray(res) ? res : []))).catch((e) => setErr(errorMessage(e, 'Could not load blocked users.')))
+  }
+  useEffect(load, [])
+  const who = (b) => b.user || b.blockedUser || b.blocked || b
+  const unblock = async (id) => {
+    setBusyId(id)
+    try { await moderationApi.unblock(id); setList((l) => l.filter((b) => (who(b).id || b.blockedUserId || b.userId) !== id)) } catch (e) { setErr(errorMessage(e, 'Could not unblock.')) } finally { setBusyId(null) }
+  }
+  return (
+    <AppLayout tab="/settings" title="Blocked users" back bottomNav={false} maxW="md" bg="canvas">
+      <TopBar title="Blocked Users" />
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8">
+        <ErrorCard message={err} onRetry={load} className="mb-3" />
+        {!list && !err && <SkelGroup><SkelList rows={3} /></SkelGroup>}
+        {list && list.length === 0 && (
+          <div className="flex flex-col items-center py-16 text-center">
+            <span className="grid h-14 w-14 place-items-center rounded-full bg-brand-50 text-brand-600"><Icon name="ban" size={24} /></span>
+            <p className="mt-3 text-[16px] font-medium text-ink-900">No blocked users</p>
+            <p className="mt-1 text-[12px] text-ink-400">People you block can’t call or message you.</p>
+          </div>
+        )}
+        {list && list.length > 0 && (
+          <div className="card divide-y divide-black/5 px-4">
+            {list.map((b) => {
+              const u = who(b)
+              const id = u.id || b.blockedUserId || b.userId
+              return (
+                <div key={id} className="flex items-center gap-3 py-3">
+                  <Avatar name={u.name || 'User'} size={40} src={u.avatarUrl} />
+                  <span className="flex-1 truncate text-[15px] font-semibold text-ink-900">{u.name || u.phone || 'User'}</span>
+                  <button onClick={() => unblock(id)} disabled={busyId === id} className="rounded-lg border border-black/10 px-3 py-1.5 text-[13px] font-semibold text-ink-700 disabled:opacity-60">{busyId === id ? '…' : 'Unblock'}</button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </AppLayout>
+  )
+}
+
+/* About us */
+export function AboutUs() {
+  return (
+    <AppLayout tab="/settings" title="About us" back bottomNav={false} maxW="md" bg="canvas">
+      <TopBar title="About Us" />
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8 space-y-3">
+        <div className="flex flex-col items-center rounded-2xl bg-white p-6 text-center shadow-sm">
+          <img src={logoUrl} alt="" className="h-16 w-16" />
+          <p className="mt-3 text-[18px] font-bold text-ink-900">Host app</p>
+          <p className="mt-1 text-[13px] text-ink-500">Talk, go live and earn — on your own schedule.</p>
+        </div>
+        <div className="card p-4 space-y-2 text-[13px] leading-relaxed text-ink-600">
+          <p>Hosts earn from video and voice calls, gifts, messages and live streams. Earnings are paid out to your bank or UPI after KYC.</p>
+          <p>Every upload is reviewed and every report is looked at by our team, to keep the community safe for hosts and users.</p>
+        </div>
+      </div>
+    </AppLayout>
+  )
+}
+
+/* Terms & policies — the rules the app already applies. */
+export function TermsPolicies() {
+  return (
+    <AppLayout tab="/settings" title="Terms & policies" back bottomNav={false} maxW="md" bg="canvas">
+      <TopBar title="Terms & Policies" />
+      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8 space-y-4">
+        <div className="card p-4">
+          <p className="text-[15px] font-bold text-ink-900">Terms of service</p>
+          <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[13px] leading-relaxed text-ink-600">
+            <li>You must complete KYC before your first withdrawal.</li>
+            <li>Nudity and sharing contact details to meet off the platform are not allowed and are removed.</li>
+            <li>Screen recording and screenshots of calls are prohibited.</li>
+            <li>Withdrawals are processed in 2–3 business days. TDS may be deducted under prevailing regulations.</li>
+          </ul>
+        </div>
+        <div id="privacy" className="card p-4">
+          <p className="text-[15px] font-bold text-ink-900">Privacy policy</p>
+          <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[13px] leading-relaxed text-ink-600">
+            <li>KYC documents are stored privately and used only to verify your identity and pay you.</li>
+            <li>Chats may be reviewed only when they are reported for safety.</li>
+            <li>You can block anyone, and manage notifications from Settings.</li>
+          </ul>
+        </div>
+        <p className="text-center text-[12px] text-ink-400">The full legal documents will be published here.</p>
       </div>
     </AppLayout>
   )

@@ -204,3 +204,10 @@ body {
     @apply card p-3.5 flex flex-col gap-1;
   }
 }
+
+/* Invoice "Save as PDF" (account.jsx): print only the invoice, not the app around it. */
+@media print {
+  body * { visibility: hidden !important; }
+  #print-invoice, #print-invoice * { visibility: visible !important; }
+  #print-invoice { position: absolute; inset: 0 auto auto 0; width: 100%; padding: 24px; background: #fff; }
+}

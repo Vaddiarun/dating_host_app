@@ -13,7 +13,8 @@ import { GoLive, Broadcast, LiveSummary } from './screens/live.jsx'
 import { Earnings, Breakdown, EarningsHistory, Statement } from './screens/earnings.jsx'
 import { DailyReport } from './screens/dailyReport.jsx'
 import { Withdraw, WithdrawConfirm, WithdrawStatus } from './screens/withdraw.jsx'
-import { Settings, KycStatus, EditProfile, RateSettings, HostLevel, Gallery, PayoutDetails, NotificationSettings, HelpSupport } from './screens/settings.jsx'
+import { Settings, KycStatus, EditProfile, RateSettings, HostLevel, Gallery, PayoutDetails, NotificationSettings, HelpSupport, Availability, BlockedUsers, AboutUs, TermsPolicies } from './screens/settings.jsx'
+import { MyWithdrawals, Invoice, MyEarnings, ReferAndEarn, MyReferrals, ProfileMenu, Languages, SupportChat } from './screens/account.jsx'
 import {
   Notifications, ReportUser, ReportSubmitted, BlockUser, Blocked, AskGift, GiftReceived,
   LoadingState, NoCalls, SomethingWrong, OfflineState, Reconnecting, SessionExpired, AccountSuspended, ScreenshotBlocked,
@@ -52,6 +53,18 @@ export default function App() {
         <Route path="/settings/payouts/add" element={<PayoutAccount standalone />} />
         <Route path="/settings/notifications" element={<NotificationSettings />} />
         <Route path="/settings/help" element={<HelpSupport />} />
+        <Route path="/settings/help/chat" element={<SupportChat />} />
+        <Route path="/settings/profile" element={<ProfileMenu />} />
+        <Route path="/settings/languages" element={<Languages />} />
+        <Route path="/settings/withdrawals" element={<MyWithdrawals />} />
+        <Route path="/settings/withdrawals/:id/invoice" element={<Invoice />} />
+        <Route path="/settings/earnings" element={<MyEarnings />} />
+        <Route path="/settings/refer" element={<ReferAndEarn />} />
+        <Route path="/settings/referrals" element={<MyReferrals />} />
+        <Route path="/settings/availability" element={<Availability />} />
+        <Route path="/settings/blocked" element={<BlockedUsers />} />
+        <Route path="/settings/about" element={<AboutUs />} />
+        <Route path="/settings/terms" element={<TermsPolicies />} />
 
         {/* The real dashboard — locked until KYC is approved, not just "logged in". */}
         <Route element={<RequireApproved><Outlet /></RequireApproved>}>

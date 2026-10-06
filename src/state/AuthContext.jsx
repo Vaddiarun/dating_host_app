@@ -71,14 +71,14 @@ export function AuthProvider({ children }) {
     return authApi.requestOtp(phone)
   }, [])
 
-  const verifyOtp = useCallback(async (phone, code) => {
+  const verifyOtp = useCallback(async (phone, code, referralCode) => {
     // The backend looks this phone number up scoped to role "host"
     // specifically (users table is unique per phone+role, not phone alone)
     // — a phone already used on the User app has a separate User account
     // that this can never return or escalate into. It either logs into
     // this phone's own Host account or creates one; either way the result
     // is always role "host".
-    await authApi.verifyOtp(phone, code, 'host')
+    await authApi.verifyOtp(phone, code, 'host', referralCode)
     const data = await profileApi.getMe()
     setMe(data)
     setStatus('authed')
