@@ -161,7 +161,10 @@ export const support = {
   listTickets: () => apiFetch('/me/support/tickets'),
   createTicket: (data) => apiFetch('/me/support/tickets', { method: 'POST', body: data }),
   getTicket: (id) => apiFetch(`/me/support/tickets/${id}`),
-  reply: (id, content) => apiFetch(`/me/support/tickets/${id}/messages`, { method: 'POST', body: { content } }),
+  // mediaKey: an attached photo, from attachmentUploadUrl + uploadToPresignedUrl. Text is optional with a photo.
+  reply: (id, content, mediaKey) =>
+    apiFetch(`/me/support/tickets/${id}/messages`, { method: 'POST', body: { content, ...(mediaKey ? { mediaKey } : {}) } }),
+  attachmentUploadUrl: (contentType) => apiFetch('/me/support/attachments/upload-url', { method: 'POST', body: { contentType } }),
 }
 
 export const notifications = {
