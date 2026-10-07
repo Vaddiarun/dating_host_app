@@ -682,6 +682,14 @@ export function SupportChat() {
                 Talk to a person
               </button>
             )}
+            {/* Topic shortcuts for a new chat — one tap sends the question. */}
+            {messages.length === 0 && !sending && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {['Withdrawal not received', 'KYC help', 'Earnings & levels', 'Call or camera problem', 'Gift issue', 'Talk to a person'].map((q) => (
+                  <button key={q} onClick={() => send({ preset: q })} className="rounded-full border border-brand-200 bg-brand-50 px-3 py-1.5 text-[12px] font-semibold text-brand-700 active:scale-95">{q}</button>
+                ))}
+              </div>
+            )}
             <ErrorCard message={err} compact className="mb-2" />
             <div className="flex items-center gap-2">
               <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { send({ photo: e.target.files?.[0] }); e.target.value = '' }} />
