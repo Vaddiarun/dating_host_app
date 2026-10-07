@@ -540,7 +540,8 @@ export function SupportChat() {
         const next = res.messages || []
         // needsAgent changes when the assistant hands the ticket to the team.
         const fresh = res.ticket || res
-        setTicket((cur) => (cur && cur.needsAgent !== fresh.needsAgent ? fresh : cur))
+        // ...and status changes when support closes it — then the chat locks (see `closed` below).
+        setTicket((cur) => (cur && (cur.needsAgent !== fresh.needsAgent || cur.status !== fresh.status) ? fresh : cur))
         if (next.some((m) => m.sender === 'bot' || m.sender === 'agent') && next[next.length - 1]?.sender !== 'host') setAwaitingReply(false)
         setMessages((cur) => (next.length !== cur.filter((m) => !String(m.id).startsWith('local-')).length ? next : cur))
       }).catch(() => {})
@@ -597,10 +598,14 @@ export function SupportChat() {
     }
   }
   const photoInputRef = useRef(null)
+  // A ticket support has closed is read-only. Writing again starts a NEW ticket (it doesn't
+  // reopen the old one), so each issue stays its own conversation for the team.
+  const closed = ticket?.status === 'closed'
+  const startNewChat = () => { setTicket(null); setMessages([]); setAwaitingReply(false); setErr('') }
 
   return (
     <AppLayout tab="/settings" title="Support" back bottomNav={false} maxW="lg" bg="canvas">
-      <TopBar title="Support chat" sub={ticket ? `Ticket ${ticket.id}` : 'Our team replies here'} />
+      <TopBar title="Support chat" sub={closed ? 'This chat is closed' : ticket ? `Ticket ${ticket.id}` : 'Our team replies here'} />
       <div className="flex min-h-[calc(100dvh-64px)] flex-col lg:min-h-[70vh]">
         <div className="flex-1 space-y-3 px-5 lg:px-0 py-4">
           {state === 'loading' && <SkelGroup><SkelList rows={3} /></SkelGroup>}
@@ -640,7 +645,14 @@ export function SupportChat() {
                   </div>
                 )
               })}
-              {awaitingReply && (
+              {closed && (
+                <div className="flex items-center gap-3 py-2 text-[12px] text-ink-400">
+                  <span className="h-px flex-1 bg-black/10" />
+                  Chat closed by support{ticket?.closedAt ? ` · ${clockTime(ticket.closedAt)}` : ''}
+                  <span className="h-px flex-1 bg-black/10" />
+                </div>
+              )}
+              {awaitingReply && !closed && (
                 <div className="flex justify-start">
                   <div className="rounded-2xl rounded-bl-md bg-white px-3.5 py-2.5 text-[13px] text-ink-400 shadow-sm">Assistant is replying…</div>
                 </div>
@@ -649,7 +661,14 @@ export function SupportChat() {
             </>
           )}
         </div>
-        {state === 'ready' && (
+        {state === 'ready' && closed && (
+          <div className="sticky bottom-0 border-t border-black/5 bg-white px-4 py-4 text-center">
+            <p className="text-[14px] font-semibold text-ink-900">This chat has been closed</p>
+            <p className="mt-0.5 text-[12px] text-ink-400">Still need help? Start a new chat and we'll pick it up.</p>
+            <button onClick={startNewChat} className="btn-primary mt-3">Start a new chat</button>
+          </div>
+        )}
+        {state === 'ready' && !closed && (
           <div className="sticky bottom-0 border-t border-black/5 bg-white px-3 py-3">
             {ticket?.needsAgent && (
               <p className="mb-2 rounded-xl bg-brand-50 px-3 py-2 text-[12px] font-medium text-brand-600">Our support team will reply here.</p>
