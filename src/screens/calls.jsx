@@ -528,7 +528,6 @@ export function ActiveCall() {
   const [callErr, setCallErr] = useState('')
   const [remoteJoined, setRemoteJoined] = useState(false) // remote video is on right now
   const [remoteSeen, setRemoteSeen] = useState(false) // the other person has connected at least once
-  const [remoteMuted, setRemoteMuted] = useState(false)
   // Screen-capture notice — once, when the call screen opens; closes by itself after 5 s.
   const [captureNotice, setCaptureNotice] = useState(true)
   useEffect(() => {
@@ -652,11 +651,9 @@ export function ActiveCall() {
         // means the other person has connected, so camera-off shows "camera off", not "Connecting".
         if (left) {
           if (mediaType === 'video') setRemoteJoined(false)
-          if (mediaType === 'audio') setRemoteMuted(true)
           return
         }
         setRemoteSeen(true)
-        if (mediaType === 'audio') setRemoteMuted(false)
         if (mediaType === 'video') {
           // Explicit `fit: 'cover'` — left unset, the remote feed is letterboxed
           // (black bars either side) whenever its captured aspect ratio doesn't match
@@ -868,7 +865,6 @@ export function ActiveCall() {
               <p className="text-[16px] font-semibold truncate drop-shadow">{callerName}</p>
               <p className="text-[12px] text-white/75 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {mm}:{ss}
-                {remoteSeen && remoteMuted && <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/80 px-1.5 py-px text-[10.5px] font-semibold text-white"><Icon name="mic-off" size={10} /> Muted</span>}
               </p>
             </div>
             <span className="flex flex-col items-end shrink-0 rounded-2xl bg-black/35 backdrop-blur-md border border-emerald-300/20 px-2.5 py-1" title="Earned so far on this call (estimate)">
