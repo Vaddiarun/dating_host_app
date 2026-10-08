@@ -529,6 +529,12 @@ export function ActiveCall() {
   const [remoteJoined, setRemoteJoined] = useState(false) // remote video is on right now
   const [remoteSeen, setRemoteSeen] = useState(false) // the other person has connected at least once
   const [remoteMuted, setRemoteMuted] = useState(false)
+  // Screen-capture notice — once, when the call screen opens; closes by itself after 5 s.
+  const [captureNotice, setCaptureNotice] = useState(true)
+  useEffect(() => {
+    const t = setTimeout(() => setCaptureNotice(false), 5000)
+    return () => clearTimeout(t)
+  }, [])
   const [remoteStream, setRemoteStream] = useState(null) // same remote video, for the blurred backdrop
   const [giftBeans, setGiftBeans] = useState(0) // gifts received during this call
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -642,10 +648,15 @@ export function ActiveCall() {
         // 'video', so the caller's subscribed audio track was never actually
         // started. Subscribing alone doesn't play it; an explicit .play() call
         // is required, same as video.
+        // Camera off = video unpublished, mic muted = audio unpublished. Any published track
+        // means the other person has connected, so camera-off shows "camera off", not "Connecting".
         if (left) {
           if (mediaType === 'video') setRemoteJoined(false)
+          if (mediaType === 'audio') setRemoteMuted(true)
           return
         }
+        setRemoteSeen(true)
+        if (mediaType === 'audio') setRemoteMuted(false)
         if (mediaType === 'video') {
           // Explicit `fit: 'cover'` — left unset, the remote feed is letterboxed
           // (black bars either side) whenever its captured aspect ratio doesn't match
@@ -839,6 +850,16 @@ export function ActiveCall() {
           of it over soft dark fades (not solid strips that ate a quarter of the picture). */}
       {/* fixed, not in page flow — focusing the chat box used to scroll the whole call view */}
       <div ref={stageRef} className={`fixed inset-0 overflow-hidden text-white ${isVoice ? 'bg-gradient-to-b from-night-700 to-night-900' : 'bg-black'}`}>
+        {captureNotice && (
+          <div role="status" className="absolute inset-x-4 top-[calc(env(safe-area-inset-top)+5rem)] z-50 mx-auto flex max-w-sm animate-fade-in items-center gap-3 rounded-2xl border border-white/15 bg-black/75 px-3.5 py-3 shadow-2xl backdrop-blur-md">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gold-400/20 text-gold-300"><Icon name="shield" size={18} /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13.5px] font-bold">Recording isn't allowed</span>
+              <span className="block text-[12px] leading-snug text-white/70">Screenshots and screen recordings of calls are blocked and logged.</span>
+            </span>
+            <button onClick={() => setCaptureNotice(false)} className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/10 text-white/80" aria-label="Dismiss"><Icon name="x" size={14} /></button>
+          </div>
+        )}
         <div className="absolute inset-x-0 top-0 z-30 bg-gradient-to-b from-black/70 via-black/35 to-transparent pb-10 pointer-events-none">
           <StatusBar dark />
           <div className="w-full max-w-[520px] mx-auto px-4 pt-1 flex items-center gap-3 pointer-events-auto">
