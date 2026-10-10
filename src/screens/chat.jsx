@@ -16,7 +16,7 @@ import { isImageMessage } from '../lib/chatImage.js'
 function ConversationList({ list, activeId, onPick, filter, setFilter, loading, err, onRetry }) {
   const { unreadIds } = useChatUnread()
   return (
-    <div className="lg:h-full lg:overflow-y-auto no-scrollbar">
+    <div className="lg:h-full lg:overflow-y-auto lg:overscroll-contain no-scrollbar">
       <div className="px-5 lg:px-4 pt-3 lg:pt-4">
         <Segmented options={['All', 'Unread']} value={filter} onChange={setFilter} />
       </div>
@@ -116,7 +116,7 @@ function Thread({ conv }) {
         <button onClick={() => setSheet((s) => !s)} className="h-9 w-9 grid place-items-center rounded-xl border border-black/10 text-ink-700">⋮</button>
       </div>
 
-      <div className="flex-1 overflow-y-auto no-scrollbar px-4 lg:px-6 py-4 space-y-2.5 bg-canvas">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain no-scrollbar px-4 lg:px-6 py-4 space-y-2.5 bg-canvas">
         {loading && <SkelGroup><SkelBubbles count={7} /></SkelGroup>}
         {!loading && err && <ErrorCard message={err} onRetry={load} />}
         {!loading && !err && messages.length === 0 && <p className="text-center text-[12px] text-ink-300">No messages yet — say hello!</p>}
@@ -239,12 +239,17 @@ export function Chat() {
       </div>
 
       {/* DESKTOP: two panes */}
-      <div className="hidden lg:grid grid-cols-[340px_1fr] h-[calc(100dvh-4rem)] border-l border-black/5">
-        <div className="border-r border-black/5">
-          <div className="px-4 pt-4"><h1 className="text-[20px] font-extrabold text-ink-900">Messages</h1><p className="text-[12px] text-ink-400">{conversations.length} conversations</p></div>
-          <ConversationList list={list} loading={loading} err={err} onRetry={reloadConversations} activeId={id} onPick={(cid) => nav(`/chat/${cid}`)} filter={filter} setFilter={setFilter} />
+      {/* Exactly one screen tall (under the 4rem top bar), each pane scrolling on its own — the
+          list used to be the column's full height *plus* the heading above it, which made the
+          whole page scroll and drag both panes along. */}
+      <div className="hidden lg:grid grid-cols-[340px_1fr] h-[calc(100dvh-4rem)] overflow-hidden border-l border-black/5">
+        <div className="flex min-h-0 flex-col border-r border-black/5">
+          <div className="shrink-0 px-4 pt-4"><h1 className="text-[20px] font-extrabold text-ink-900">Messages</h1><p className="text-[12px] text-ink-400">{conversations.length} conversations</p></div>
+          <div className="min-h-0 flex-1 overscroll-contain">
+            <ConversationList list={list} loading={loading} err={err} onRetry={reloadConversations} activeId={id} onPick={(cid) => nav(`/chat/${cid}`)} filter={filter} setFilter={setFilter} />
+          </div>
         </div>
-        <div className="relative">
+        <div className="relative min-h-0">
           {conv ? <Thread conv={conv} /> : (
             <div className="h-full grid place-items-center text-center px-8">
               <div><Icon name="chat" size={40} className="mx-auto text-ink-300" /><p className="mt-3 text-[15px] font-semibold text-ink-500">Select a conversation</p></div>
