@@ -6,6 +6,7 @@ import { Splash, Login, Otp, ProfileSetup, GallerySetup, LiveAudition, KycIntro,
 import Home from './screens/home.jsx'
 import { TopSpenders, TopPerformers } from './screens/leaderboard.jsx'
 import Performance from './screens/performance.jsx'
+import { Rewards } from './screens/rewards.jsx'
 import { BeautySettings } from './screens/beautySettings.jsx'
 import { CallsList, IncomingCall, Connecting, ActiveCall, CallSummary } from './screens/calls.jsx'
 import { ChatList, ChatConvo } from './screens/chat.jsx'
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="/home" element={<Home />} />
           <Route path="/leaderboard/spenders" element={<TopSpenders />} />
           <Route path="/leaderboard/performers" element={<TopPerformers />} />
+          <Route path="/rewards" element={<Rewards />} />
 
           <Route path="/calls" element={<CallsList />} />
           <Route path="/call/incoming" element={<IncomingCall />} />

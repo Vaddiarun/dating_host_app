@@ -6,6 +6,7 @@ import { AppLayout } from '../ui/layouts.jsx'
 import { earnings as earningsApi } from '../api/index.js'
 import { rupees, clockTime, dayLabel, beans as beansFmt, isoDate } from '../lib/format.js'
 import { errorMessage } from '../lib/errors.js'
+import { onSocketEventWhenReady } from '../lib/socket.js'
 import { Skel, SkelGroup, SkelHero, SkelStats, SkelList, SkelCard } from '../ui/Skeleton.jsx'
 
 /* 25 — Earnings */
@@ -21,6 +22,8 @@ export function Earnings() {
     earningsApi.summary().then(setSummary).catch((e) => setErr(errorMessage(e, 'Could not load your earnings.'))).finally(() => setLoading(false))
   }
   useEffect(load, [])
+  // A daily/weekly reward is added straight to the beans — refresh the balance when it lands.
+  useEffect(() => onSocketEventWhenReady('notification:new', (n) => { if (n?.type === 'host_reward') load() }), [])
 
   const week = (summary?.last7Days || []).map((d) => {
     const dt = new Date(d.date)

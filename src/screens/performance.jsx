@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef, useId } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Icon from '../ui/Icon.jsx'
 import { Avatar, Toggle, SectionTitle, ErrorCard, FloatingGoLive } from '../ui/kit.jsx'
@@ -8,6 +8,7 @@ import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 import { earnings as earningsApi, presence as presenceApi } from '../api/index.js'
 import { errorMessage } from '../lib/errors.js'
 import { TodayReportCard } from './dailyReport.jsx'
+import { RewardsTeaser } from './rewards.jsx'
 import { Skel, SkelGroup, SkelHero, SkelCard } from '../ui/Skeleton.jsx'
 
 function Header({ name, isOnline }) {
@@ -64,54 +65,212 @@ function InviteBanner() {
 /* No backend field for any of this yet (performance score, conversion, livestream score) —
  * shown as a static placeholder per product's request, clearly separate from the real
  * online/offline card above it. Swap for real numbers once the backend exposes them. */
-// LED-segment meter: a half-ring of bars that light up one by one up to the score (no needle).
-const LED_CX = 100
-const LED_CY = 104
-const LED_COUNT = 28
-const ledColor = (t) => (t < 0.25 ? '#f43f5e' : t < 0.5 ? '#f59e0b' : t < 0.75 ? '#eab308' : '#10b981')
-const LED_SEGMENTS = Array.from({ length: LED_COUNT }, (_, i) => {
-  const t = (i + 0.5) / LED_COUNT
-  const a = Math.PI * (1 - t) // t=0 left end, t=1 right end
-  const p = (r) => [LED_CX + r * Math.cos(a), LED_CY - r * Math.sin(a)]
-  const [x1, y1] = p(64)
-  const [x2, y2] = p(88)
-  return { t, x1, y1, x2, y2, color: ledColor(t) }
+// Sports-car style gauge (Audi virtual cockpit look): dark instrument face, tick ring with
+// numbers, a glowing red needle that does an ignition sweep on mount, a digital score in the
+// middle and a perspective road under it that scrolls faster the higher the score.
+const G = { W: 240, H: 196, CX: 120, CY: 108, R: 92, MAX: 120, START: 210, SWEEP: 240, INNER: 54 }
+const METER = { score: 100, plus: true, tier: 'Excellent', conversion: '46:11' }
+
+const gaugeAngle = (v) => ((G.START - (Math.min(v, G.MAX) / G.MAX) * G.SWEEP) * Math.PI) / 180
+const gaugePt = (v, r) => [G.CX + r * Math.cos(gaugeAngle(v)), G.CY - r * Math.sin(gaugeAngle(v))]
+function gaugeArc(v0, v1, r) {
+  const [x0, y0] = gaugePt(v0, r)
+  const [x1, y1] = gaugePt(v1, r)
+  const large = ((v1 - v0) / G.MAX) * G.SWEEP > 180 ? 1 : 0
+  return `M${x0} ${y0}A${r} ${r} 0 ${large} 1 ${x1} ${y1}`
+}
+const GAUGE_TICKS = Array.from({ length: G.MAX / 5 + 1 }, (_, i) => {
+  const v = i * 5
+  const major = v % 20 === 0
+  const [x1, y1] = gaugePt(v, G.R - (major ? 11 : 6))
+  const [x2, y2] = gaugePt(v, G.R - 1)
+  const [lx, ly] = gaugePt(v, G.R - 22)
+  return { v, major, x1, y1, x2, y2, lx, ly }
 })
 
-function PerformanceMeter() {
-  const pct = 0.86 // how far the bars light up for the "100+ / Excellent" tier (placeholder until the backend sends a score)
-  const [lit, setLit] = useState(false)
-  // Bars start dim and light up in sequence on mount — requestAnimationFrame so the dim frame
-  // paints first and the CSS transitions actually run instead of snapping.
+// Road: world depth z (1 = bottom edge of the road, larger = further away) projected onto the
+// screen between the horizon and the bottom of the inner dial.
+const ROAD = { top: G.CY + 6, bottom: G.CY + G.INNER - 2, half: 30, dashes: 7, gap: 1.1, len: 0.5 }
+const roadY = (z) => ROAD.top + (ROAD.bottom - ROAD.top) / z
+const roadHalf = (y) => (ROAD.half * (y - ROAD.top)) / (ROAD.bottom - ROAD.top)
+
+/** Ignition sweep: needle runs to the end of the scale, then settles on the score. */
+function useIgnitionSweep(target) {
+  const [v, setV] = useState(0)
   useEffect(() => {
-    const id = requestAnimationFrame(() => setLit(true))
-    return () => cancelAnimationFrame(id)
-  }, [])
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { setV(target); return }
+    let raf
+    let start
+    const up = 650
+    const down = 900
+    const ease = (k) => 1 - Math.pow(1 - k, 3)
+    const step = (now) => {
+      start ??= now
+      const t = now - start
+      if (t < up) setV(G.MAX * ease(t / up))
+      else if (t < up + down) setV(G.MAX + (target - G.MAX) * ease((t - up) / down))
+      else { setV(target); return }
+      raf = requestAnimationFrame(step)
+    }
+    const delay = setTimeout(() => { raf = requestAnimationFrame(step) }, 250)
+    return () => { clearTimeout(delay); cancelAnimationFrame(raf) }
+  }, [target])
+  return v
+}
+
+/** Moves the lane dashes towards the viewer. Writes the polygons straight to the DOM each frame
+ * rather than re-rendering React 60 times a second. */
+function useRoad(dashRefs, postRefs, speed) {
+  useEffect(() => {
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const span = ROAD.dashes * ROAD.gap
+    let raf
+    let last
+    let phase = 0
+    const draw = () => {
+      dashRefs.current.forEach((el, i) => {
+        if (!el) return
+        const zNear = 1 + ((i * ROAD.gap - phase) % span + span) % span
+        const zFar = zNear + ROAD.len
+        const yN = roadY(zNear)
+        const yF = roadY(zFar)
+        const wN = Math.max(0.4, roadHalf(yN) * 0.07)
+        const wF = Math.max(0.3, roadHalf(yF) * 0.07)
+        el.setAttribute('points', `${G.CX - wF},${yF} ${G.CX + wF},${yF} ${G.CX + wN},${yN} ${G.CX - wN},${yN}`)
+        el.setAttribute('opacity', String(Math.min(1, 1.6 / zNear)))
+      })
+      postRefs.current.forEach((el, i) => {
+        if (!el) return
+        const k = Math.floor(i / 2)
+        const side = i % 2 ? 1 : -1
+        const z = 1 + ((k * ROAD.gap * 1.6 - phase) % (span * 0.8) + span * 0.8) % (span * 0.8)
+        const y = roadY(z)
+        const x = G.CX + side * roadHalf(y) * 1.6 * 1.12
+        const h = Math.max(0.6, 6 / z)
+        el.setAttribute('x', String(x - h * 0.18))
+        el.setAttribute('y', String(y - h))
+        el.setAttribute('width', String(h * 0.36))
+        el.setAttribute('height', String(h))
+        el.setAttribute('opacity', String(Math.min(0.9, 1.4 / z)))
+      })
+    }
+    const step = (now) => {
+      if (last != null) phase += ((now - last) / 1000) * speed
+      last = now
+      draw()
+      raf = requestAnimationFrame(step)
+    }
+    draw()
+    if (!reduced) raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [dashRefs, postRefs, speed])
+}
+
+function PerformanceMeter() {
+  const uid = useId().replace(/:/g, '')
+  const v = useIgnitionSweep(METER.score)
+  const dashRefs = useRef([])
+  const postRefs = useRef([])
+  useRoad(dashRefs, postRefs, 0.8 + (METER.score / G.MAX) * 2.6)
+  const settled = Math.abs(v - METER.score) < 0.5
+  const [nx1, ny1] = gaugePt(v, G.INNER + 6)
+  const [nx2, ny2] = gaugePt(v, G.R + 4)
 
   return (
-    <div className="card p-4">
-      <div className="flex items-center gap-1.5 mb-1">
-        <SectionTitle className="!mb-0">Performance Meter</SectionTitle>
-        <Icon name="help" size={13} className="text-ink-300" />
+    <div className="relative overflow-hidden rounded-2xl bg-[radial-gradient(120%_90%_at_50%_0%,#23232c_0%,#0c0c11_55%,#050507_100%)] p-4 text-white shadow-pop ring-1 ring-white/10">
+      {/* brushed-metal sheen */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+      <div className="flex items-center gap-1.5">
+        <p className="text-[12px] font-semibold uppercase tracking-[.14em] text-white/55">Performance Meter</p>
+        <Icon name="help" size={13} className="text-white/30" />
+        <span className="ml-auto rounded-md bg-white/[.06] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[.18em] text-[#ff4d5e] ring-1 ring-white/10">Dynamic</span>
       </div>
+
       <div className="flex flex-col items-center">
-        <svg viewBox="0 0 200 112" className="w-60 max-w-full h-auto">
-          {LED_SEGMENTS.map((s, i) => (
-            <line
-              key={i}
-              x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2}
-              stroke={s.color} strokeWidth="5.5" strokeLinecap="round"
-              style={{ opacity: lit && s.t <= pct ? 1 : 0.15, transition: 'opacity 400ms ease', transitionDelay: `${i * 35}ms` }}
-            />
+        <svg viewBox={`0 0 ${G.W} ${G.H}`} className="w-full max-w-[300px] h-auto" role="img" aria-label={`Performance score ${METER.score}${METER.plus ? '+' : ''}, ${METER.tier}`}>
+          <defs>
+            <linearGradient id={`${uid}-arc`} x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stopColor="#ff1e3c" stopOpacity=".35" />
+              <stop offset="100%" stopColor="#ff3b4e" />
+            </linearGradient>
+            <radialGradient id={`${uid}-face`} cx="50%" cy="40%" r="60%">
+              <stop offset="0%" stopColor="#1d1d26" />
+              <stop offset="100%" stopColor="#060609" />
+            </radialGradient>
+            <linearGradient id={`${uid}-road`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#2a2a35" stopOpacity="0" />
+              <stop offset="100%" stopColor="#2a2a35" />
+            </linearGradient>
+            <linearGradient id={`${uid}-sky`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#ff3b4e" stopOpacity="0" />
+              <stop offset="100%" stopColor="#ff3b4e" stopOpacity=".28" />
+            </linearGradient>
+            <filter id={`${uid}-glow`} x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="2.4" result="b" />
+              <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+            <clipPath id={`${uid}-inner`}><circle cx={G.CX} cy={G.CY} r={G.INNER - 1} /></clipPath>
+          </defs>
+
+          {/* outer bezel + track */}
+          <path d={gaugeArc(0, G.MAX, G.R + 7)} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="1" strokeLinecap="round" />
+          <path d={gaugeArc(0, G.MAX, G.R + 3)} fill="none" stroke="rgba(255,255,255,.07)" strokeWidth="4" strokeLinecap="round" />
+          {v > 0.5 && <path d={gaugeArc(0, v, G.R + 3)} fill="none" stroke={`url(#${uid}-arc)`} strokeWidth="4" strokeLinecap="round" filter={`url(#${uid}-glow)`} />}
+
+          {/* ticks + numbers */}
+          {GAUGE_TICKS.map((t) => (
+            <g key={t.v}>
+              <line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke={t.v <= v ? '#fff' : 'rgba(255,255,255,.28)'} strokeWidth={t.major ? 2 : 1} strokeLinecap="round" />
+              {t.major && Math.abs(t.v - v) > 6 && (
+                <text x={t.lx} y={t.ly + 3} textAnchor="middle" fontSize="9" fontWeight="600" fill={t.v <= v ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.35)'} style={{ fontVariantNumeric: 'tabular-nums' }}>{t.v}</text>
+              )}
+            </g>
           ))}
-          <text x={LED_CX} y={LED_CY - 12} textAnchor="middle" fontSize="28" fontWeight="800" fill="#1c1330">100+</text>
-          <text x={LED_CX} y={LED_CY + 2} textAnchor="middle" fontSize="8.5" fontWeight="700" letterSpacing="1" fill="#8c8a96">SCORE</text>
+
+          {/* inner dial: digital readout over the road */}
+          <circle cx={G.CX} cy={G.CY} r={G.INNER} fill={`url(#${uid}-face)`} stroke="rgba(255,255,255,.12)" strokeWidth="1" />
+          <g clipPath={`url(#${uid}-inner)`}>
+            <rect x={G.CX - G.INNER} y={ROAD.top - 14} width={G.INNER * 2} height="14" fill={`url(#${uid}-sky)`} />
+            <polygon points={`${G.CX},${ROAD.top} ${G.CX + ROAD.half * 1.6},${G.CY + G.INNER} ${G.CX - ROAD.half * 1.6},${G.CY + G.INNER}`} fill={`url(#${uid}-road)`} />
+            <line x1={G.CX} y1={ROAD.top} x2={G.CX - ROAD.half * 1.6} y2={G.CY + G.INNER} stroke="rgba(255,255,255,.55)" strokeWidth=".8" />
+            <line x1={G.CX} y1={ROAD.top} x2={G.CX + ROAD.half * 1.6} y2={G.CY + G.INNER} stroke="rgba(255,255,255,.55)" strokeWidth=".8" />
+            {Array.from({ length: ROAD.dashes }, (_, i) => (
+              <polygon key={i} ref={(el) => { dashRefs.current[i] = el }} fill="#fff" />
+            ))}
+            {Array.from({ length: 8 }, (_, i) => (
+              <rect key={i} ref={(el) => { postRefs.current[i] = el }} rx=".3" fill={i % 2 ? '#ff6b78' : '#ffe2a8'} />
+            ))}
+            <line x1={G.CX - G.INNER} y1={ROAD.top} x2={G.CX + G.INNER} y2={ROAD.top} stroke="rgba(255,77,94,.5)" strokeWidth=".6" />
+            {/* our car, from behind — body, rear window and a full-width LED tail-light bar */}
+            <g transform={`translate(${G.CX} ${G.CY + G.INNER - 9})`}>
+              <ellipse cx="0" cy="6.5" rx="16" ry="2.2" fill="#000" opacity=".6" />
+              <path d="M-14 5 L-14 -1 Q-14 -3 -12 -3.5 L-8 -4 L-6 -8.5 Q-5.5 -9.5 -4 -9.5 L4 -9.5 Q5.5 -9.5 6 -8.5 L8 -4 L12 -3.5 Q14 -3 14 -1 L14 5 Q14 6 13 6 L-13 6 Q-14 6 -14 5 Z" fill="#1a1a22" stroke="rgba(255,255,255,.35)" strokeWidth=".5" />
+              <path d="M-5.2 -8 L5.2 -8 L6.8 -4.3 L-6.8 -4.3 Z" fill="#3a3a48" />
+              <rect x="-12.5" y="-2.2" width="25" height="1.6" rx=".8" fill="#ff2a3d" filter={`url(#${uid}-glow)`} />
+              <rect x="-4" y="1.6" width="8" height="2.2" rx=".4" fill="#0b0b10" stroke="rgba(255,255,255,.25)" strokeWidth=".3" />
+            </g>
+          </g>
+          <text x={G.CX} y={G.CY - 14} textAnchor="middle" fontSize="30" fontWeight="800" fill="#fff" style={{ fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em' }}>
+            {Math.round(v)}{settled && METER.plus ? '+' : ''}
+          </text>
+          <text x={G.CX} y={G.CY - 1} textAnchor="middle" fontSize="7.5" fontWeight="700" letterSpacing="2" fill="rgba(255,255,255,.5)">SCORE</text>
+
+          {/* needle */}
+          <line x1={nx1} y1={ny1} x2={nx2} y2={ny2} stroke="#ff3b4e" strokeWidth="2.6" strokeLinecap="round" filter={`url(#${uid}-glow)`} />
+          <line x1={nx1} y1={ny1} x2={nx2} y2={ny2} stroke="#ffd2d7" strokeWidth=".8" strokeLinecap="round" />
         </svg>
 
-        <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[12px] font-bold text-emerald-700">
-          <Icon name="trending-up" size={12} /> Excellent
-        </span>
-        <p className="text-[11.5px] text-ink-400 mt-2">Conversion <span className="font-semibold text-ink-700">46:11</span></p>
+        {/* trip-computer strip */}
+        <div className="-mt-3 grid w-full max-w-[300px] grid-cols-2 divide-x divide-white/10 rounded-xl bg-white/[.04] py-2 ring-1 ring-white/10">
+          <div className="flex flex-col items-center">
+            <span className="text-[9.5px] font-semibold uppercase tracking-[.16em] text-white/40">Rating</span>
+            <span className="mt-0.5 inline-flex items-center gap-1 text-[13px] font-bold text-emerald-400"><Icon name="trending-up" size={12} /> {METER.tier}</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <span className="text-[9.5px] font-semibold uppercase tracking-[.16em] text-white/40">Conversion</span>
+            <span className="mt-0.5 text-[13px] font-bold tabular-nums">{METER.conversion}</span>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -211,6 +370,7 @@ export default function Performance() {
             <ErrorCard message={err} onRetry={load} compact />
             <PresenceCard isOnline={isOnline} toggling={toggling} onToggle={toggleOnline} />
             <TodayReportCard />
+            <RewardsTeaser />
             <InviteBanner />
             <PerformanceMeter />
             <LivestreamScore />
@@ -237,6 +397,7 @@ export default function Performance() {
           <div className="space-y-4">
             <PresenceCard isOnline={isOnline} toggling={toggling} onToggle={toggleOnline} />
             <TodayReportCard />
+            <RewardsTeaser />
             <InviteBanner />
             <HelpVideosRow />
             <LeaderboardLinks />

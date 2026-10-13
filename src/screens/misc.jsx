@@ -16,15 +16,18 @@ import { Skel, SkelGroup, SkelHero, SkelStats, SkelList } from '../ui/Skeleton.j
 /* 44 — Notifications */
 // v1 notification types from the backend: gift, withdrawal_status, missed_call. Rendered
 // generically (title/message from the payload) so any type added later still shows something.
-const NOTIF_GROUP = { gift: 'Money', withdrawal_status: 'Money', missed_call: 'Calls' }
-const NOTIF_ICON = { gift: 'gift', withdrawal_status: 'wallet', missed_call: 'phone' }
-const NOTIF_TONE = { gift: 'gold', withdrawal_status: 'brand', missed_call: 'rose' }
+const NOTIF_GROUP = { gift: 'Money', withdrawal_status: 'Money', missed_call: 'Calls', host_reward: 'Money' }
+const NOTIF_ICON = { gift: 'gift', withdrawal_status: 'wallet', missed_call: 'phone', host_reward: 'trophy' }
+const NOTIF_TONE = { gift: 'gold', withdrawal_status: 'brand', missed_call: 'rose', host_reward: 'gold' }
+// Tapping one of these opens the related screen as well as marking it read.
+const NOTIF_LINK = { host_reward: '/rewards' }
 const notifId = (n) => n.id ?? n._id
 const notifRead = (n) => n.isRead ?? n.read ?? false
-const notifTitle = (n) => n.title || n.message || { gift: 'You received a gift', withdrawal_status: 'Withdrawal status changed', missed_call: 'You missed a call' }[n.type] || 'Notification'
+const notifTitle = (n) => n.title || n.message || { gift: 'You received a gift', withdrawal_status: 'Withdrawal status changed', missed_call: 'You missed a call', host_reward: 'You won a reward!' }[n.type] || 'Notification'
 const notifSub = (n) => n.sub || n.subtitle || n.body || ''
 
 export function Notifications() {
+  const nav = useNavigate()
   const { refresh: refreshUnreadBadge, decrementBy } = useNotificationsCount()
   const [f, setF] = useState('All')
   const [items, setItems] = useState([])
@@ -102,7 +105,7 @@ export function Notifications() {
             <SectionTitle className="mt-5 mb-1">{day}</SectionTitle>
             <div className="card px-4 divide-y divide-black/5">
               {list.map((it, i) => (
-                <button key={notifId(it) ?? i} onClick={() => markRead(it)} className="w-full flex items-center gap-3 py-3 text-left">
+                <button key={notifId(it) ?? i} onClick={() => { markRead(it); if (NOTIF_LINK[it.type]) nav(NOTIF_LINK[it.type]) }} className="w-full flex items-center gap-3 py-3 text-left">
                   <IconBadge name={NOTIF_ICON[it.type] || 'bell'} tone={NOTIF_TONE[it.type] || 'brand'} />
                   <div className="flex-1 min-w-0">
                     <p className={`text-[14px] ${notifRead(it) ? 'font-medium text-ink-700' : 'font-semibold text-ink-900'}`}>{notifTitle(it)}</p>

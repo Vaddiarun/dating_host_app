@@ -38,6 +38,9 @@ export const profile = {
   updateHostProfile: (data) => apiFetch('/me/host-profile', { method: 'PATCH', body: data }),
   // Host level: level, lifetimeEarnedBeans, beansToNextLevel, maxPrices, currentPrices,
   // nextLevelMaxPrices, and the full 20-level table. Levels rise automatically with earnings.
+  // Each row also has `unlocked` (can be picked) and `selected` (being charged now);
+  // `priceLevel` is the host's pick (null = automatic) and `pricedLevel` the level charged.
+  // Rates can't be typed in any more — pick a level with updateHostProfile({ priceLevel }).
   getLevel: () => apiFetch('/me/level'),
 
   getKycUploadUrl: (contentType) => apiFetch('/me/kyc/upload-url', { method: 'POST', body: { contentType } }),
@@ -147,6 +150,15 @@ export const earnings = {
 export const stats = {
   daily: (date, tz) => apiFetch('/me/stats/daily', { query: { date, tz } }),
   range: (from, to, tz) => apiFetch('/me/stats/daily-summary', { query: { from, to, tz } }),
+}
+
+/** Daily & weekly rewards. get() → { daily, weekly }, each { enabled, periodStart, periodEnd,
+ * tiers: [{ rank, rewardBeans, host: { hostId, name, imageUrl, beans, isMe } | null }], totalRewardBeans, minQualifyingBeans, myBeans, myRank (null
+ * until qualified), myRewardBeans (what they'd win if the period ended now), beansToQualify }.
+ * history() → { payouts: [...] } — past wins { period, periodStart, periodEnd, rank, beansEarned, rewardBeans, paidAt }. */
+export const rewards = {
+  get: () => apiFetch('/me/rewards'),
+  history: (page = 1, pageSize = 20) => apiFetch('/me/rewards/history', { query: { page, pageSize } }),
 }
 
 /** Referrals — NOT built on the backend yet (requested; see docs). Until they exist these 404 and

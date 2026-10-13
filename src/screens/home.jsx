@@ -7,8 +7,10 @@ import { useAuth } from '../state/AuthContext.jsx'
 import { useNotificationsCount } from '../state/NotificationsContext.jsx'
 import { earnings as earningsApi, presence as presenceApi } from '../api/index.js'
 import { rupees, clockTime } from '../lib/format.js'
+import { onSocketEventWhenReady } from '../lib/socket.js'
 import { errorMessage } from '../lib/errors.js'
 import { TodayReportCard } from './dailyReport.jsx'
+import { DailyWinsBanner } from './rewards.jsx'
 import { Skel, SkelGroup, SkelHero, SkelStats, SkelList } from '../ui/Skeleton.jsx'
 
 function MobileHead({ label, tone, name, avatarUrl }) {
@@ -111,6 +113,8 @@ export default function Home() {
   }, [])
 
   useEffect(() => { load() }, [load])
+  // A daily/weekly reward is added straight to the beans — show the new balance right away.
+  useEffect(() => onSocketEventWhenReady('notification:new', (n) => { if (n?.type === 'host_reward') load() }), [load])
 
   const previewState = sp.get('state')
   const state = previewState || (dash?.isOnline ? 'online' : 'offline')
@@ -213,6 +217,7 @@ export default function Home() {
           {/* main column */}
           <div className="space-y-4">
             <ErrorCard message={err} onRetry={load} compact />
+            {(state === 'offline' || state === 'online') && <DailyWinsBanner />}
             {hero}
             {showBalance && <div className="lg:hidden"><Balance paise={balance?.availableBalancePaise} beans={balance?.beanBalance} /></div>}
             <div className="hidden lg:block"><Balance paise={balance?.availableBalancePaise} beans={balance?.beanBalance} /></div>

@@ -84,7 +84,7 @@ function fromStats(d) {
     complete: true,
     goalSeconds: d.dailyGoalSeconds || null,
     totalPaise: e.totalPaise ?? 0,
-    sources: { video: src(e.videoCalls), voice: src(e.voiceCalls), gifts: src(e.gifts), live: src(e.liveStreams), other: src(e.other) },
+    sources: { video: src(e.videoCalls), voice: src(e.voiceCalls), gifts: src(e.gifts), live: src(e.liveStreams), rewards: src(e.rewards), other: src(e.other) },
     otherItems: e.other?.items || [],
     online: d.online ? {
       totalSeconds: d.online.totalSeconds ?? 0,
@@ -111,7 +111,7 @@ export async function loadDay(date, isToday) {
   return {
     complete: false,
     totalPaise: b?.grossEarningsPaise ?? dash?.todayEarningsPaise ?? 0,
-    sources: { video: amt(b?.bySource?.videoCalls), voice: amt(b?.bySource?.voiceCalls), gifts: amt(b?.bySource?.gifts), live: amt(b?.bySource?.liveStreams), other: null },
+    sources: { video: amt(b?.bySource?.videoCalls), voice: amt(b?.bySource?.voiceCalls), gifts: amt(b?.bySource?.gifts), live: amt(b?.bySource?.liveStreams), rewards: amt(b?.bySource?.rewards), other: null },
     otherItems: [],
     online: null,
     calls: dash?.todayCallsCount != null ? { answered: dash.todayCallsCount } : null,
@@ -141,6 +141,8 @@ export const SOURCES = [
   { key: 'gifts', label: 'Gifts', icon: 'gift', color: '#eda100', unit: ['gift', 'gifts'] },
   { key: 'voice', label: 'Voice calls', icon: 'phone', color: '#2a78d6', unit: ['call', 'calls'] },
   { key: 'live', label: 'Live streams', icon: 'live', color: '#eb6834', unit: ['stream', 'streams'] },
+  // Daily / Weekly Wins payouts — only shown on days one was paid.
+  { key: 'rewards', label: 'Rewards', icon: 'trophy', color: '#c2410c', unit: ['reward', 'rewards'] },
   // Backend: paid chat messages + adjustments (there's no bonus system yet), each labelled in items.
   { key: 'other', label: 'Messages & other', icon: 'chat', color: '#1baf7a', unit: ['item', 'items'] },
 ]

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from './AuthContext.jsx'
 import { getSocket, onSocketEvent } from '../lib/socket.js'
 import { unlockAudio, playChime } from '../lib/sound.js'
-import { beans as formatBeans } from '../lib/format.js'
+import { beans as formatBeans, lakhBeans } from '../lib/format.js'
 import Icon from '../ui/Icon.jsx'
 import { GiftRays, ConfettiBurst, FloatingSparkles, useCountUpFrom0 } from '../ui/GiftCelebration.jsx'
 
@@ -55,6 +55,67 @@ function GiftPopup({ data, onClose }) {
   )
 }
 
+const REWARD_POPUP_MS = 9000
+
+/** A daily/weekly reward win (notification:new, type "host_reward") — the biggest moment in the
+ * app, so it gets the full celebration: trophy over rays and confetti, the rank, the beans
+ * counting up, and a way through to the rewards screen. */
+function RewardPopup({ data, onClose, onView }) {
+  const count = useCountUpFrom0(data.rewardBeans)
+  const weekly = data.period === 'weekly'
+  return (
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center px-6 bg-ink-900/50 backdrop-blur-[2px] animate-fade-in" onClick={onClose} role="alertdialog" aria-label={data.title}>
+      <div className="relative w-full max-w-[340px] rounded-3xl bg-[#140a2b] text-white shadow-pop overflow-hidden animate-pop-in" onClick={(e) => e.stopPropagation()}>
+        <div className="pointer-events-none absolute -left-16 -top-20 h-60 w-60 rounded-full bg-brand-600/50 blur-3xl" />
+        <FloatingSparkles seed={data.at} />
+        <button onClick={onClose} className="absolute z-10 top-3 right-3 h-7 w-7 grid place-items-center rounded-full text-white/50 hover:bg-white/10 hover:text-white" aria-label="Close">
+          <Icon name="x" size={14} />
+        </button>
+        <div className="relative flex flex-col items-center text-center px-6 pt-9 pb-5">
+          <div className="relative grid place-items-center h-24 w-24">
+            <GiftRays size={260} />
+            <span className="pointer-events-none absolute h-28 w-28 rounded-full bg-gold-300/40 blur-2xl animate-glow-breathe" />
+            <ConfettiBurst seed={data.at} />
+            <span className="relative grid place-items-center h-[76px] w-[76px] rounded-[24px] bg-gradient-to-br from-gold-300 to-gold-500 text-[#5a3d00] shadow-[0_12px_30px_-8px_rgba(224,169,46,.9)] gift-pop">
+              <Icon name="trophy" size={36} />
+            </span>
+          </div>
+          <p className="relative mt-4 text-[11px] font-bold uppercase tracking-[.16em] text-gold-300 animate-slide-up" style={{ animationDelay: '200ms' }}>{weekly ? 'Weekly Wins' : 'Daily Wins'}</p>
+          <h2 className="relative mt-1 text-[22px] font-extrabold animate-slide-up" style={{ animationDelay: '260ms' }}>{data.rank ? `You finished #${data.rank}!` : data.title}</h2>
+          {data.message && <p className="relative mt-1 text-[13px] text-white/65 animate-slide-up" style={{ animationDelay: '330ms' }}>{data.message}</p>}
+        </div>
+        {data.rewardBeans > 0 && (
+          <div className="relative gift-shine flex items-center justify-between px-6 py-3 bg-gold-400/15 border-t border-white/10">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gold-300 whitespace-nowrap">Added to balance</span>
+            <span className="text-[18px] font-extrabold text-gold-300 tabular-nums whitespace-nowrap">+{data.rewardBeans >= 1e5 && count === data.rewardBeans ? lakhBeans(count) : formatBeans(count)} beans</span>
+          </div>
+        )}
+        <div className="relative px-5 pt-3 pb-5">
+          <button onClick={onView} className="btn-gold">View my wins</button>
+        </div>
+        <span className="relative block h-[3px] bg-gold-400/70 gift-timer" style={{ animationDuration: `${REWARD_POPUP_MS}ms` }} />
+      </div>
+    </div>
+  )
+}
+
+/** The reward fields may sit at the top level of the notification or under data/metadata. */
+function rewardFromNotification(n) {
+  const d = { ...(n?.metadata || {}), ...(n?.data || {}), ...(n?.payload || {}) }
+  // The text reads e.g. "Daily reward won! You ranked #1 — 150000 beans added", so fall back to
+  // reading rank / beans / period from it when they aren't sent as fields.
+  const text = [n?.title, n?.body, n?.message].filter(Boolean).join(' ')
+  const rankInText = /#\s*(\d+)/.exec(text)?.[1]
+  const beansInText = /(\d[\d,]*)\s*beans/i.exec(text)?.[1]
+  return {
+    title: n?.title || 'You won a reward!',
+    message: n?.body || n?.message || '',
+    rank: d.rank ?? n?.rank ?? (rankInText ? Number(rankInText) : null),
+    rewardBeans: d.rewardBeans ?? n?.rewardBeans ?? (beansInText ? Number(beansInText.replace(/,/g, '')) : 0),
+    period: d.period ?? n?.period ?? (/weekly/i.test(text) ? 'weekly' : 'daily'),
+  }
+}
+
 /** Mounted once at the app root while authed. Turns the backend's realtime push
  * (call:incoming / call:ended / gift:received / kyc:decision) into real navigation
  * + a notice, instead of the host having to poll or manually deep-link. */
@@ -63,8 +124,10 @@ export default function RealtimeBridge() {
   const nav = useNavigate()
   const [toast, setToast] = useState(null) // { icon, title } | null — quiet one-liners
   const [gift, setGift] = useState(null) // { senderName?, giftName, beansCredited } | null
+  const [reward, setReward] = useState(null) // { title, message, rank, rewardBeans, period, at } | null
   const toastTimerRef = useRef(null)
   const giftTimerRef = useRef(null)
+  const rewardTimerRef = useRef(null)
 
   // The incoming-call ringtone fires from an async socket push, with no click/tap happening
   // at that exact moment — a browser only lets audio actually play if its AudioContext was
@@ -141,6 +204,14 @@ export default function RealtimeBridge() {
         showToast('crown', `Level up! You're now Level ${level} — your max prices went up`)
       }))
 
+      unsubs.push(onSocketEvent('notification:new', (n) => {
+        if (n?.type !== 'host_reward') return
+        clearTimeout(rewardTimerRef.current)
+        setReward({ ...rewardFromNotification(n), at: Date.now() })
+        try { playChime() } catch { /* audio not unlocked yet — the visual still plays */ }
+        rewardTimerRef.current = setTimeout(() => setReward(null), REWARD_POPUP_MS)
+      }))
+
       unsubs.push(onSocketEvent('gift:requestDeclined', () => {
         showToast('gift', 'Gift request declined')
       }))
@@ -161,6 +232,7 @@ export default function RealtimeBridge() {
       cancelled = true
       clearTimeout(toastTimerRef.current)
       clearTimeout(giftTimerRef.current)
+      clearTimeout(rewardTimerRef.current)
       unsubs.forEach((u) => u())
     }
   }, [status, nav, refreshMe])
@@ -174,6 +246,14 @@ export default function RealtimeBridge() {
             <span className="text-[13px] font-semibold">{toast.title}</span>
           </div>
         </div>
+      )}
+      {reward && (
+        <RewardPopup
+          key={reward.at}
+          data={reward}
+          onClose={() => { clearTimeout(rewardTimerRef.current); setReward(null) }}
+          onView={() => { clearTimeout(rewardTimerRef.current); setReward(null); nav(`/rewards?tab=${reward.period}`) }}
+        />
       )}
       {gift && <GiftPopup key={gift.at} data={gift} onClose={() => { clearTimeout(giftTimerRef.current); setGift(null) }} />}
     </>

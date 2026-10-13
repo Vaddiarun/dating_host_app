@@ -18,6 +18,17 @@ export function compactBeans(n) {
   return String(v)
 }
 
+/** Indian short form for big bean amounts — 1500000 -> "15L", 750000 -> "7.5L", 90000 -> "90K",
+ * 20000000 -> "2Cr". Used for reward prizes, where full digits are hard to read at a glance. */
+export function lakhBeans(n) {
+  const v = n ?? 0
+  const short = (x) => x.toFixed(x >= 100 ? 0 : 1).replace(/\.0$/, '')
+  if (v >= 1e7) return `${short(v / 1e7)}Cr`
+  if (v >= 1e5) return `${short(v / 1e5)}L`
+  if (v >= 1e3) return `${short(v / 1e3)}K`
+  return String(v)
+}
+
 export function initialsName(host) {
   return host?.name || host?.username || host?.phone || 'Host'
 }

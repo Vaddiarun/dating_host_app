@@ -98,9 +98,18 @@ export function Settings() {
         </div>
 
         <div className="px-5 lg:px-0 pb-24 lg:pb-6">
+          <SectionTitle className="mt-5 lg:mt-0 mb-1">Growth</SectionTitle>
+          <div className="divide-y divide-black/5">
+            <Row icon="trophy" tone="gold" title="Daily & Weekly Wins" sub="Top earners win bonus beans" onClick={() => nav('/rewards')} />
+            <Row icon="trending-up" tone="brand" title="Performance" sub="Meter, livestream score & leaderboards" onClick={() => nav('/settings/performance')} />
+            <Row icon="crown" tone="gold" title="Host level" sub={level ? `Level ${level.level}${level.beansToNextLevel != null ? ` · ${beans(level.beansToNextLevel)} beans to next` : ' · Max level'}` : 'Your level & prices'} onClick={() => nav('/settings/level')} />
+            <Row icon="sparkles" tone="gold" title="Beauty filter" sub="Smooth your camera in calls & live" onClick={() => nav('/settings/beauty-filter')} />
+          </div>
+
+          <SectionTitle className="mt-6 mb-1">Account</SectionTitle>
           <div className="divide-y divide-black/5">
             <Row icon="user" tone="brand" title="My Profile & Gallery" sub="Name, bio, languages" onClick={() => nav('/settings/edit-profile')} />
-            <Row icon="card" tone="gold" title="Rate settings" sub={videoRate ? `${rupees(videoRate)}/min video` : 'Set your rates'} onClick={() => nav('/settings/rates')} />
+            <Row icon="card" tone="gold" title="Rate settings" sub={level ? `Level ${level.pricedLevel ?? level.level} prices${level.priceLevel == null ? ' · automatic' : ''}${videoRate ? ` · ${rupees(videoRate)}/min video` : ''}` : 'Choose your price level'} onClick={() => nav('/settings/rates')} />
             <Row icon="info" tone="brand" title="KYC Details" sub={<span className="capitalize">{kycLabel}</span>} onClick={() => nav('/settings/kyc')} />
             <Row icon="wallet" tone="brand" title="Payout details" sub={payoutSub} onClick={() => nav('/settings/payouts')} />
             <Row icon="receipt" tone="brand" title="My Withdrawals" onClick={() => nav('/settings/withdrawals')} />
@@ -114,13 +123,6 @@ export function Settings() {
           <div className="divide-y divide-black/5">
             <Row icon="bell" tone="brand" title="Notifications" sub="Calls, gifts, payouts" onClick={() => nav('/settings/notifications')} />
             <Row icon="live" tone="brand" title="Availability" sub="Auto-accept, voice-only hours" onClick={() => nav('/settings/availability')} />
-          </div>
-
-          <SectionTitle className="mt-6 mb-1">Growth</SectionTitle>
-          <div className="divide-y divide-black/5">
-            <Row icon="trending-up" tone="brand" title="Performance" sub="Meter, livestream score & leaderboards" onClick={() => nav('/settings/performance')} />
-            <Row icon="crown" tone="gold" title="Host level" sub={level ? `Level ${level.level}${level.beansToNextLevel != null ? ` · ${beans(level.beansToNextLevel)} beans to next` : ' · Max level'}` : 'Your level & prices'} onClick={() => nav('/settings/level')} />
-            <Row icon="sparkles" tone="gold" title="Beauty filter" sub="Smooth your camera in calls & live" onClick={() => nav('/settings/beauty-filter')} />
           </div>
 
           <SectionTitle className="mt-6 mb-1">Support</SectionTitle>
@@ -415,12 +417,12 @@ export function HostLevel() {
               <PriceRow label="Voice call" unit="/min" current={data.currentPrices.voiceRatePerMinutePaise} max={data.maxPrices.voiceRatePerMinutePaise} />
               <PriceRow label="Message" unit="/msg" current={data.currentPrices.messageRatePaise} max={data.maxPrices.messageRatePaise} />
             </div>
-            <button onClick={() => nav('/settings/rates')} className="btn-outline mt-3">Change my rates</button>
+            <button onClick={() => nav('/settings/rates')} className="btn-outline mt-3">Choose my price level</button>
 
             </div>
             {data.nextLevelMaxPrices && (
               <p className="order-3 mt-4 text-[13px] text-ink-500">
-                At Level {data.level + 1} you can charge up to {rupees(data.nextLevelMaxPrices.videoRatePerMinutePaise)}/min video, {rupees(data.nextLevelMaxPrices.voiceRatePerMinutePaise)}/min voice and {rupees(data.nextLevelMaxPrices.messageRatePaise)} per message.
+                Level {data.level + 1} unlocks {rupees(data.nextLevelMaxPrices.videoRatePerMinutePaise)}/min video, {rupees(data.nextLevelMaxPrices.voiceRatePerMinutePaise)}/min voice and {rupees(data.nextLevelMaxPrices.messageRatePaise)} per message.
               </p>
             )}
 
@@ -429,8 +431,9 @@ export function HostLevel() {
             <div className="card p-4 space-y-2.5 text-[13px] text-ink-600">
               <p>• Everyone starts at <span className="font-semibold text-ink-900">Level 1</span>: ₹30/min video, ₹20/min voice and ₹5 per message.</p>
               <p>• You move up one level for every <span className="font-semibold text-ink-900">{beans(data.beansPerLevel)} beans</span> you earn from calls, gifts and messages — automatically, no action needed.</p>
-              <p>• Each level raises your maximum video, voice and message price by <span className="font-semibold text-ink-900">₹20</span>. Level {data.maxLevel ?? data.levels?.length ?? 20} is the top.</p>
-              <p>• You can charge less than your maximum in Rate settings. Leave a rate empty to always charge your level's price — it goes up by itself when you level up.</p>
+              <p>• Each level raises the video, voice and message prices you can charge by <span className="font-semibold text-ink-900">₹20</span>. Level {data.maxLevel ?? data.levels?.length ?? 20} is the top.</p>
+              <p>• In Rate settings you can pick any level up to yours and charge exactly that level's prices. Choose <span className="font-semibold text-ink-900">Automatic</span> to always charge your own level — your prices go up by themselves when you level up.</p>
+              <p>• Daily &amp; Weekly Wins reward beans can be withdrawn, but they don't count towards your level.</p>
               <p>• Withdrawing your beans never lowers your level — it's based on everything you've ever earned.</p>
             </div>
             </div>
@@ -438,7 +441,7 @@ export function HostLevel() {
 
           <div className="order-4 lg:order-none">
             <SectionTitle className="mt-5 lg:mt-0 mb-2">All levels & prices</SectionTitle>
-            <p className="-mt-1 mb-2 text-[12px] text-ink-400">Maximum prices you can charge at each level. Prices are in ₹.</p>
+            <p className="-mt-1 mb-2 text-[12px] text-ink-400">The prices you charge at each level. Prices are in ₹.</p>
             {/* A real <table> so columns stay aligned; scrolls sideways on narrow phones
                 instead of squashing six columns into the screen width. */}
             <div className="card overflow-x-auto">
@@ -496,194 +499,246 @@ function PriceRow({ label, unit, current, max }) {
       <span className="text-[15px] font-semibold text-ink-900">{label}</span>
       <span className="text-right">
         <span className="block text-[15px] font-bold text-ink-900">{rupees(current)}{unit}</span>
-        <span className="block text-[12px] text-ink-400">{current === max ? 'Level price' : `Max ${rupees(max)}${unit}`}</span>
+        <span className="block text-[12px] text-ink-400">{current === max ? 'Your level price' : `Lower level · yours is ${rupees(max)}${unit}`}</span>
       </span>
     </div>
   )
 }
 
-/* 40 — Rate settings */
+/* 40 — Rate settings: pick a price level. Rates can't be typed in any more — a host charges
+ * exactly one level's video / voice / message prices, any level up to the one they've
+ * unlocked. "Automatic" (priceLevel: null) always charges the unlocked level, so prices rise
+ * by themselves on every level-up. */
 export function RateSettings() {
+  const nav = useNavigate()
   const { me, setMe } = useAuth()
-  const hp = me?.hostProfile
-  const [video, setVideo] = useState(hp?.ratePerMinutePaise != null ? String(hp.ratePerMinutePaise / 100) : '')
-  const [voice, setVoice] = useState(hp?.voiceRatePerMinutePaise != null ? String(hp.voiceRatePerMinutePaise / 100) : '')
-  const [message, setMessage] = useState(hp?.messageRatePaise != null ? String(hp.messageRatePaise / 100) : '')
-  const [priv, setPriv] = useState(hp?.privateLiveRatePerMinutePaise != null ? String(hp.privateLiveRatePerMinutePaise / 100) : '')
-  const [auto, setAuto] = useState(hp?.autoAcceptCalls ?? true)
-  const [night, setNight] = useState(hp?.voiceCallsOnlyAfterMidnight ?? false)
   const [level, setLevel] = useState(null)
+  const [loadErr, setLoadErr] = useState('')
+  const [draft, setDraft] = useState(undefined) // undefined = untouched; null = automatic; n = level
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [saved, setSaved] = useState(false)
-  const [editing, setEditing] = useState(false)
+  const savedPriv = me?.hostProfile?.privateLiveRatePerMinutePaise
+  const [priv, setPriv] = useState(savedPriv != null ? String(savedPriv / 100) : '')
+  const [privBusy, setPrivBusy] = useState(false)
+  const [privErr, setPrivErr] = useState('')
+  const [privSaved, setPrivSaved] = useState(false)
+  const privDirty = priv !== '' && Math.round(Number(priv) * 100) !== savedPriv
 
-  useEffect(() => { profileApi.getLevel().then(setLevel).catch(() => {}) }, [])
-  const max = level?.maxPrices
+  const load = () => {
+    setLoadErr('')
+    return profileApi.getLevel().then(setLevel).catch((e) => setLoadErr(errorMessage(e, 'Could not load your price levels.')))
+  }
+  useEffect(() => { load() }, [])
 
-  // Empty = "charge my level's price" (sent as null), which then rises by itself on every
-  // level-up. A typed value must stay at or under the level maximum — the backend enforces
-  // this too (400); checking here just gives a clearer message before the round-trip.
-  const toPaise = (v) => (v === '' ? null : Math.round(Number(v) * 100))
-  const capped = [
-    [toPaise(video), max?.videoRatePerMinutePaise, 'Video call'],
-    [toPaise(voice), max?.voiceRatePerMinutePaise, 'Voice call'],
-    [toPaise(message), max?.messageRatePaise, 'Message'],
-  ]
+  const unlockedLevel = level?.level
+  const savedPick = level ? (level.priceLevel ?? null) : undefined
+  const pick = draft === undefined ? savedPick : draft
+  const dirty = draft !== undefined && draft !== savedPick
+  const rows = level?.levels || []
+  const isUnlocked = (l) => l.unlocked ?? l.level <= unlockedLevel
+  const rowFor = (n) => rows.find((l) => l.level === n)
+  const chargingLevel = level?.pricedLevel ?? rows.find((l) => l.selected)?.level ?? unlockedLevel
+  const chargingNow = rowFor(chargingLevel)
+  const willCharge = rowFor(pick ?? unlockedLevel)
+
+  const choose = (v) => { setErr(''); setSaved(false); setDraft(v) }
 
   const save = async () => {
-    setErr('')
-    setSaved(false)
-    for (const [value, cap, label] of capped) {
-      if (value != null && cap != null && value > cap) {
-        setErr(`${label} can't be more than ${rupees(cap)} at Level ${level.level}.`)
-        return
-      }
-    }
     setBusy(true)
+    setErr('')
     try {
-      const updated = await profileApi.updateHostProfile({
-        ratePerMinutePaise: toPaise(video),
-        voiceRatePerMinutePaise: toPaise(voice),
-        messageRatePaise: toPaise(message),
-        privateLiveRatePerMinutePaise: priv ? Math.round(Number(priv) * 100) : undefined,
-        autoAcceptCalls: auto,
-        voiceCallsOnlyAfterMidnight: night,
-      })
+      const updated = await profileApi.updateHostProfile({ priceLevel: pick })
       setMe({ ...me, hostProfile: { ...me?.hostProfile, ...updated } })
+      await load()
+      setDraft(undefined)
       setSaved(true)
-      setEditing(false)
-      profileApi.getLevel().then(setLevel).catch(() => {}) // refresh the rates shown on the level card
     } catch (e) {
-      setErr(errorMessage(e, 'Could not save rates.'))
+      // e.g. 400 for a level that isn't unlocked — the backend's message says why
+      setErr(errorMessage(e, 'Could not save your price level.'))
     } finally {
       setBusy(false)
     }
   }
 
-  const hint = (cap) => (cap != null ? `Up to ${rupees(cap)} at Level ${level.level} · leave empty to use ${rupees(cap)}` : '')
+  const savePriv = async () => {
+    setPrivBusy(true)
+    setPrivErr('')
+    setPrivSaved(false)
+    try {
+      const updated = await profileApi.updateHostProfile({ privateLiveRatePerMinutePaise: Math.round(Number(priv) * 100) })
+      setMe({ ...me, hostProfile: { ...me?.hostProfile, ...updated } })
+      setPrivSaved(true)
+    } catch (e) {
+      setPrivErr(errorMessage(e, 'Could not save your private live rate.'))
+    } finally {
+      setPrivBusy(false)
+    }
+  }
 
-  // What callers pay right now: the host's own rate if set, otherwise the level price.
-  const videoNow = level?.currentPrices?.videoRatePerMinutePaise ?? hp?.ratePerMinutePaise
-  const voiceNow = level?.currentPrices?.voiceRatePerMinutePaise ?? hp?.voiceRatePerMinutePaise
+  const PRICES = [
+    ['video', 'Video / min', 'videoRatePerMinutePaise'],
+    ['phone', 'Voice / min', 'voiceRatePerMinutePaise'],
+    ['chat', 'Per message', 'messageRatePaise'],
+  ]
 
   return (
-    <AppLayout tab="/settings" title="Rate settings" back bottomNav={false} maxW="lg" bg="canvas">
-      <TopBar title="Rate settings" />
-      <div className="px-5 lg:px-0 pt-4 lg:pt-0 pb-8 lg:grid lg:grid-cols-[380px_1fr] lg:gap-6 lg:items-start">
-        {/* My level card */}
-        <div className="lg:sticky lg:top-6">
-          {!level ? (
-            <SkelGroup><SkelHero height="h-56" /></SkelGroup>
-          ) : (
+    <AppLayout tab="/settings" title="Rate settings" back bottomNav={false} maxW="xl" bg="canvas">
+      <TopBar title="Rate settings" sub="Choose the price level you charge" />
+      {loadErr && !level && <ErrorCard message={loadErr} onRetry={load} className="mt-6" />}
+      {!level && !loadErr && (
+        <SkelGroup className="px-5 lg:px-0 pt-4 lg:pt-0 lg:grid lg:grid-cols-[380px_1fr] lg:gap-6 lg:items-start">
+          <SkelHero height="h-60" className="rounded-[28px]" />
+          <SkelList rows={8} avatar={false} className="mt-5 lg:mt-0" />
+        </SkelGroup>
+      )}
+      {level && (
+        <div className={`px-5 lg:px-0 pt-4 lg:pt-0 lg:grid lg:grid-cols-[380px_1fr] lg:gap-6 lg:items-start ${dirty ? 'pb-40 lg:pb-32' : 'pb-8'}`}>
+          {/* What callers pay right now */}
+          <div className="lg:sticky lg:top-6 space-y-4">
             <div className="relative overflow-hidden rounded-[28px] bg-[#120a24] p-5 text-white shadow-lg">
               <div className="pointer-events-none absolute -left-10 -top-16 h-56 w-56 rounded-full bg-brand-600/50 blur-3xl" />
               <div className="pointer-events-none absolute -right-12 bottom-0 h-40 w-40 rounded-full bg-fuchsia-600/30 blur-3xl" />
               <div className="relative">
-                <div className="flex items-center gap-2.5">
-                  <p className="text-[20px] font-semibold">My Level —</p>
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[13px] font-extrabold ring-1 ring-white/10">
-                    <span aria-hidden>👑</span> LVL {level.level}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[13px] font-semibold text-white/70">You're charging</p>
+                  <span className="pill bg-white/10 text-[11px] font-bold text-white ring-1 ring-white/10">
+                    {level.priceLevel == null ? <><Icon name="refresh" size={11} /> Automatic</> : <><Icon name="lock" size={11} /> Fixed level</>}
                   </span>
                 </div>
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  {[['Video Call Rate', videoNow], ['Audio Call Rate', voiceNow]].map(([label, v]) => (
-                    <div key={label} className="rounded-2xl border border-white/15 bg-white/[.04] px-3 py-3.5 text-center">
-                      <p className="text-[12px] text-white/70">{label}</p>
-                      <p className="mt-1 text-[18px] font-extrabold text-gold-400">{v != null ? `${rupees(v)}/min` : '—'}</p>
+                <p className="mt-1 text-[28px] font-extrabold leading-tight">Level {chargingLevel} <span className="text-[15px] font-semibold text-white/55">prices</span></p>
+                <div className="mt-4 grid grid-cols-3 gap-2.5">
+                  {PRICES.map(([icon, label, key]) => (
+                    <div key={key} className="rounded-2xl border border-white/15 bg-white/[.04] px-2 py-3 text-center">
+                      <Icon name={icon} size={15} className="mx-auto text-white/60" />
+                      <p className="mt-1 text-[16px] font-extrabold text-gold-400 whitespace-nowrap">{chargingNow ? rupees(chargingNow[key]) : '—'}</p>
+                      <p className="text-[10.5px] text-white/55">{label}</p>
                     </div>
                   ))}
                 </div>
-                <button onClick={() => { setSaved(false); setErr(''); setEditing(true) }} className="mt-4 h-12 w-full rounded-xl bg-brand-600 text-[15px] font-bold text-white transition hover:bg-brand-500 active:scale-[.99]">
-                  Change call rate
-                </button>
-                {saved && <p className="mt-2 text-center text-[12px] font-semibold text-emerald-300">Rates saved</p>}
+                <div className="mt-4 flex items-center gap-2 rounded-xl bg-white/[.06] px-3 py-2.5 text-[12px] text-white/75">
+                  <span aria-hidden>👑</span>
+                  <span className="flex-1">Unlocked up to <b className="text-white">Level {unlockedLevel}</b></span>
+                  <button onClick={() => nav('/settings/level')} className="font-semibold text-gold-300">How to level up</button>
+                </div>
+                {saved && <p className="mt-3 flex items-center justify-center gap-1.5 text-[12px] font-semibold text-emerald-300"><Icon name="check" size={13} /> Saved — new calls and messages use these prices</p>}
               </div>
             </div>
-          )}
-        </div>
+            <div className="hidden lg:block card p-4 text-[13px] text-ink-500 space-y-1.5">
+              <p className="font-semibold text-ink-900">Tip</p>
+              <p>A lower level means cheaper calls for users, which can bring you more of them. Pick <b className="text-ink-900">Automatic</b> to always charge your highest unlocked level.</p>
+            </div>
+          </div>
 
-        {/* Level table — current level ticked, higher levels faded */}
-        <div className="mt-5 lg:mt-0">
-          {!level ? (
-            <SkelGroup><SkelList rows={8} avatar={false} /></SkelGroup>
-          ) : (
+          {/* Picker */}
+          <div className="mt-5 lg:mt-0 space-y-3" role="radiogroup" aria-label="Price level">
+            <button
+              role="radio"
+              aria-checked={pick === null}
+              onClick={() => choose(null)}
+              className={`w-full flex items-start gap-3 rounded-2xl border-2 bg-white p-4 text-left transition ${pick === null ? 'border-brand-600 shadow-[0_8px_24px_-12px_rgba(91,46,229,.6)]' : 'border-black/[.07] hover:border-brand-200'}`}
+            >
+              <Radio on={pick === null} />
+              <span className="flex-1 min-w-0">
+                <span className="flex flex-wrap items-center gap-2 text-[15px] font-bold text-ink-900">Automatic — always my current level <span className="pill !px-2 !py-0.5 bg-brand-50 text-brand-700 text-[10px] font-bold">RECOMMENDED</span></span>
+                <span className="block mt-0.5 text-[13px] text-ink-500">Always charge Level {unlockedLevel} prices. They go up by themselves when you level up.</span>
+              </span>
+            </button>
+
             <div className="overflow-hidden rounded-2xl border border-black/[.07] bg-white">
-              <div className="grid grid-cols-[1fr_1fr_1fr_1fr_44px] items-center bg-black/[.03] px-4 py-3 text-[12px] text-ink-400">
-                <span>Level</span><span>Video</span><span>Voice</span><span>Message</span><span />
+              <div className="grid grid-cols-[32px_1.1fr_1fr_1fr_1fr] items-center gap-1 bg-black/[.03] px-4 py-2.5 text-[11px] font-bold uppercase tracking-wide text-ink-400">
+                <span /><span>Level</span><span className="text-right">Video</span><span className="text-right">Voice</span><span className="text-right">Msg</span>
               </div>
-              {level.levels?.map((l) => {
-                const current = l.level === level.level
-                const locked = l.level > level.level
+              {rows.map((l) => {
+                const open = isUnlocked(l)
+                const on = pick === l.level
+                const isTop = l.level === unlockedLevel
+                const charging = l.level === chargingLevel
                 return (
-                  <div
+                  <button
                     key={l.level}
-                    className={`grid grid-cols-[1fr_1fr_1fr_1fr_44px] items-center border-t border-black/[.06] px-4 py-3.5 text-[13px] ${current ? 'bg-brand-100/70 font-bold text-ink-900' : locked ? 'text-ink-300' : 'font-semibold text-ink-900'}`}
+                    role="radio"
+                    aria-checked={on}
+                    aria-disabled={!open}
+                    disabled={!open}
+                    onClick={() => choose(l.level)}
+                    className={`w-full grid grid-cols-[32px_1.1fr_1fr_1fr_1fr] items-center gap-1 border-t border-black/[.06] px-4 py-3 text-left text-[13px] transition ${on ? 'bg-brand-50' : open ? 'hover:bg-black/[.02]' : 'cursor-not-allowed bg-black/[.015]'}`}
                   >
-                    <span>Lv {l.level}</span>
-                    <span>{rupees(l.videoRatePerMinutePaise)}</span>
-                    <span>{rupees(l.voiceRatePerMinutePaise)}</span>
-                    <span>{rupees(l.messageRatePaise)}</span>
-                    <span className="flex justify-end">
-                      {current ? (
-                        <span className="grid h-6 w-6 place-items-center rounded-md bg-brand-600 text-white"><Icon name="check" size={14} /></span>
-                      ) : (
-                        <span className={`h-6 w-6 rounded-md border-[1.5px] ${locked ? 'border-black/10' : 'border-brand-200'}`} />
+                    {open ? <Radio on={on} /> : <span className="grid h-5 w-5 place-items-center text-ink-300"><Icon name="lock" size={14} /></span>}
+                    <span className={`min-w-0 ${open ? 'font-bold text-ink-900' : 'text-ink-300'}`}>
+                      <span className="block">Lv {l.level}</span>
+                      {isTop && <span className="block text-[10px] font-bold uppercase tracking-wide text-gold-600">Your level</span>}
+                      {!isTop && charging && <span className="block text-[10px] font-bold uppercase tracking-wide text-brand-600">Charging</span>}
+                      {!open && l.requiredLifetimeBeans != null && level.lifetimeEarnedBeans != null && (
+                        <span className="block text-[10px] font-medium truncate">{beans(Math.max(0, l.requiredLifetimeBeans - level.lifetimeEarnedBeans))} to go</span>
                       )}
                     </span>
-                  </div>
+                    {PRICES.map(([, , key]) => (
+                      <span key={key} className={`text-right whitespace-nowrap ${open ? 'font-semibold text-ink-900' : 'text-ink-300'}`}>{rupees(l[key])}</span>
+                    ))}
+                  </button>
                 )
               })}
             </div>
-          )}
-          {level && <p className="mt-2 px-1 text-[12px] text-ink-400">Maximum price per minute (video, voice) and per message at each level. You move up automatically as you earn.</p>}
-        </div>
-      </div>
+            <p className="px-1 text-[12px] text-ink-400">Each level has fixed prices for video and voice calls (per minute) and for messages. Locked levels open up as you earn.</p>
 
-      {/* Change call rate — bottom sheet with the rate form */}
-      {editing && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 animate-fade-in lg:items-center" onClick={() => setEditing(false)}>
-          <div className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-3xl bg-canvas p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:rounded-3xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
-            <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-black/10 lg:hidden" />
-            <div className="mb-4 flex items-center justify-between">
-              <p className="text-[18px] font-extrabold text-ink-900">Change call rate</p>
-              <button onClick={() => setEditing(false)} className="grid h-9 w-9 place-items-center rounded-full bg-black/5 text-ink-500" aria-label="Close"><Icon name="x" size={16} /></button>
+            <div className="card p-4">
+              <p className="text-[15px] font-bold text-ink-900">Private live rate</p>
+              <p className="text-[12.5px] text-ink-400">Per minute, for one-to-one private live. This one isn't part of the level prices.</p>
+              <div className="mt-3 flex gap-2">
+                <label className="relative flex-1">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-ink-400">₹</span>
+                  <input className="input pl-8" inputMode="decimal" value={priv} onChange={(e) => { setPrivSaved(false); setPriv(e.target.value.replace(/[^\d.]/g, '')) }} placeholder="30" aria-label="Private live rate per minute" />
+                </label>
+                <button onClick={savePriv} disabled={!privDirty || privBusy} className="btn-primary !w-auto px-5">{privBusy ? 'Saving…' : 'Save'}</button>
+              </div>
+              <ErrorCard message={privErr} compact className="mt-2" />
+              {privSaved && <p className="mt-2 flex items-center gap-1.5 text-[12px] font-semibold text-emerald-600"><Icon name="check" size={13} /> Saved</p>}
             </div>
-        <div>
-        <SectionTitle className="mb-2">Per-minute rates (₹)</SectionTitle>
-        <div className="card p-4 space-y-3.5">
-          <div>
-            <span className="label">Video call</span>
-            <input className="input" value={video} onChange={(e) => setVideo(e.target.value.replace(/[^\d.]/g, ''))} placeholder={max ? String(max.videoRatePerMinutePaise / 100) : ''} />
-            <p className="text-[12px] text-ink-400 mt-1">{hint(max?.videoRatePerMinutePaise)}</p>
           </div>
-          <div>
-            <span className="label">Voice call</span>
-            <input className="input" value={voice} onChange={(e) => setVoice(e.target.value.replace(/[^\d.]/g, ''))} placeholder={max ? String(max.voiceRatePerMinutePaise / 100) : ''} />
-            <p className="text-[12px] text-ink-400 mt-1">{hint(max?.voiceRatePerMinutePaise)}</p>
-          </div>
-          <div><span className="label">Private live</span><input className="input" value={priv} onChange={(e) => setPriv(e.target.value.replace(/[^\d.]/g, ''))} placeholder="30" /></div>
         </div>
-        </div>
-        <div>
-        <SectionTitle className="mt-5 lg:mt-0 mb-2">Per-message price (₹)</SectionTitle>
-        <div className="card p-4">
-          <span className="label">Message from a user</span>
-          <input className="input" value={message} onChange={(e) => setMessage(e.target.value.replace(/[^\d.]/g, ''))} placeholder={max ? String(max.messageRatePaise / 100) : ''} />
-          <p className="text-[12px] text-ink-400 mt-1">{hint(max?.messageRatePaise)}</p>
-        </div>
-        <SectionTitle className="mt-5 mb-2">Availability</SectionTitle>
-        <div className="card p-4 divide-y divide-black/5">
-          <div className="flex items-center gap-3 pb-3"><span className="flex-1 text-[15px] font-semibold text-ink-900">Auto-accept calls</span><Toggle on={auto} onChange={setAuto} /></div>
-          <div className="flex items-center gap-3 pt-3"><span className="flex-1 text-[15px] font-semibold text-ink-900">Voice calls only after 12 AM</span><Toggle on={night} onChange={setNight} /></div>
-        </div>
-        </div>
-        <ErrorCard message={err} compact className="mt-3" />
-        <button onClick={save} disabled={busy} className="btn-primary mt-4 disabled:opacity-60">{busy ? 'Saving…' : 'Save rates'}</button>
+      )}
+
+      {/* Save bar — only once the pick differs from what's saved */}
+      {level && dirty && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-black/5 bg-white/95 px-5 pt-3 pb-[max(0.875rem,env(safe-area-inset-bottom))] backdrop-blur animate-slide-up lg:left-[248px]">
+          <div className="mx-auto max-w-3xl">
+            {willCharge && chargingNow && (
+              <div className="mb-2.5 grid grid-cols-3 gap-2">
+                {PRICES.map(([icon, label, key]) => {
+                  const from = chargingNow[key]
+                  const to = willCharge[key]
+                  return (
+                    <div key={key} className="rounded-xl bg-black/[.03] px-2 py-1.5 text-center">
+                      <p className="text-[10.5px] text-ink-400">{label}</p>
+                      <p className="text-[12.5px] whitespace-nowrap">
+                        {from !== to && <span className="text-ink-300 line-through mr-1">{rupees(from)}</span>}
+                        <b className={to > from ? 'text-rose-500' : to < from ? 'text-emerald-600' : 'text-ink-900'}>{rupees(to)}</b>
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            <ErrorCard message={err} compact className="mb-2" />
+            <div className="grid grid-cols-[auto_1fr] gap-3">
+              <button onClick={() => { setDraft(undefined); setErr('') }} disabled={busy} className="btn-outline !w-auto px-5">Cancel</button>
+              <button onClick={save} disabled={busy} className="btn-primary disabled:opacity-60">
+                {busy ? 'Saving…' : pick === null ? 'Save — Automatic' : `Save — charge Level ${pick} prices`}
+              </button>
+            </div>
           </div>
         </div>
       )}
     </AppLayout>
+  )
+}
+
+function Radio({ on }) {
+  return (
+    <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 transition ${on ? 'border-brand-600 bg-brand-600' : 'border-black/20 bg-white'}`}>
+      {on && <span className="h-2 w-2 rounded-full bg-white" />}
+    </span>
   )
 }
 
