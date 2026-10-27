@@ -3,6 +3,7 @@ import { auth as authApi, profile as profileApi } from '../api/index.js'
 import { getTokens, clearTokens } from '../api/client.js'
 import { connectSocket, disconnectSocket } from '../lib/socket.js'
 import { setBeautySettings } from '../lib/beautyFilter.js'
+import { firebasePhoneAuthEnabled, sendPhoneCode, confirmPhoneCode } from '../lib/phoneAuth.js'
 
 const AuthContext = createContext(null)
 
@@ -68,7 +69,8 @@ export function AuthProvider({ children }) {
 
   const requestOtp = useCallback(async (phone) => {
     setPendingPhone(phone)
-    return authApi.requestOtp(phone)
+    // Firebase sends the SMS once it's configured; until then the backend's own OTP does.
+    return firebasePhoneAuthEnabled ? sendPhoneCode(phone) : authApi.requestOtp(phone)
   }, [])
 
   const verifyOtp = useCallback(async (phone, code, referralCode) => {
@@ -78,7 +80,12 @@ export function AuthProvider({ children }) {
     // that this can never return or escalate into. It either logs into
     // this phone's own Host account or creates one; either way the result
     // is always role "host".
-    await authApi.verifyOtp(phone, code, 'host', referralCode)
+    if (firebasePhoneAuthEnabled) {
+      const idToken = await confirmPhoneCode(code)
+      await authApi.firebaseVerify(idToken, 'host', referralCode)
+    } else {
+      await authApi.verifyOtp(phone, code, 'host', referralCode)
+    }
     const data = await profileApi.getMe()
     setMe(data)
     setStatus('authed')

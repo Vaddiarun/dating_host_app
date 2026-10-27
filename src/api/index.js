@@ -16,6 +16,13 @@ export const auth = {
     setTokens(data)
     return data
   },
+  // Firebase Phone Auth: Firebase sent and checked the OTP; trade its ID token for our session.
+  // Same response as otp/verify (tokens + user). 503 until Firebase is configured on the backend.
+  firebaseVerify: async (idToken, role = 'host', referralCode) => {
+    const data = await apiFetch('/auth/firebase/verify', { method: 'POST', auth: false, body: { idToken, role, ...(referralCode ? { referralCode } : {}) } })
+    setTokens(data)
+    return data
+  },
   refresh: async () => {
     const { refreshToken } = getTokens()
     const data = await apiFetch('/auth/token/refresh', { method: 'POST', auth: false, body: { refreshToken } })
