@@ -124,6 +124,11 @@ export function Login() {
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-black/[.03] px-3 py-2.5 text-[12px] text-ink-400">
           <Icon name="shield" size={15} className="mt-0.5 shrink-0" /> By continuing you agree to the Terms and Privacy Policy.
         </div>
+        <p className="mt-2 px-1 text-[11px] leading-snug text-ink-400">
+          This site is protected by reCAPTCHA and the Google{' '}
+          <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer" className="underline">Privacy Policy</a> and{' '}
+          <a href="https://policies.google.com/terms" target="_blank" rel="noreferrer" className="underline">Terms of Service</a> apply.
+        </p>
         <button onClick={submit} disabled={busy} className="btn-primary mt-4 disabled:opacity-60">
           <Icon name="chevron-right" size={18} /> {busy ? 'Sending…' : 'Send code'}
         </button>
