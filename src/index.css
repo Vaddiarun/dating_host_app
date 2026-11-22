@@ -211,8 +211,3 @@ body {
   #print-invoice, #print-invoice * { visibility: visible !important; }
   #print-invoice { position: absolute; inset: 0 auto auto 0; width: 100%; padding: 24px; background: #fff; }
 }
-
-/* Firebase phone login's reCAPTCHA badge sat bottom-right on every screen, over the bottom tab
- * bar. Google allows hiding it when the login screen shows the reCAPTCHA notice instead (see the
- * phone-number screen). */
-.grecaptcha-badge { visibility: hidden !important; }

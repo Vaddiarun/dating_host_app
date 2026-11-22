@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VIBE_API_BASE_URL || 'https://triloapp-plan.onrender.com'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://triloapp-plan.onrender.com'
 
 const ACCESS_KEY = 'triloplan_host_access_token'
 const REFRESH_KEY = 'triloplan_host_refresh_token'

@@ -2,16 +2,16 @@
  * ever sees the Firebase ID token it gets back (POST /auth/firebase/verify), never the code.
  *
  * Configured with the TriloPlan Firebase project's web app config (Project settings → General →
- * Your apps → Web app) in VIBE_FIREBASE_API_KEY / _AUTH_DOMAIN / _PROJECT_ID / _APP_ID. Until all
+ * Your apps → Web app) in VITE_FIREBASE_API_KEY / _AUTH_DOMAIN / _PROJECT_ID / _APP_ID. Until all
  * four are set, `firebasePhoneAuthEnabled` is false and login keeps using the old backend OTP. */
 import { initializeApp } from 'firebase/app'
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, signOut, initializeRecaptchaConfig } from 'firebase/auth'
 
 const config = {
-  apiKey: import.meta.env.VIBE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VIBE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VIBE_FIREBASE_PROJECT_ID,
-  appId: import.meta.env.VIBE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
 export const firebasePhoneAuthEnabled = Object.values(config).every(Boolean)
