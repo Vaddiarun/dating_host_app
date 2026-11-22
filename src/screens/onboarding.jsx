@@ -11,6 +11,7 @@ import { referenceCode } from '../lib/format.js'
 import { getBeautySettings, openBeautyCamera } from '../lib/beautyFilter.js'
 import { uploadAvatar } from '../lib/avatar.js'
 import { Skel } from '../ui/Skeleton.jsx'
+import { InstallAppButton } from '../ui/InstallApp.jsx'
 
 /* 1 — Splash */
 export function Splash() {
@@ -127,6 +128,7 @@ export function Login() {
         <button onClick={submit} disabled={busy} className="btn-primary mt-4 disabled:opacity-60">
           <Icon name="chevron-right" size={18} /> {busy ? 'Sending…' : 'Send code'}
         </button>
+        <InstallAppButton className="mt-3" />
       </div>
     </CenterLayout>
   )

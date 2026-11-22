@@ -66,6 +66,19 @@ export function InstallAppCard({ className = '', always = false }) {
   )
 }
 
+// Small "Get the app" button for the login screen: opens the install dialog where the browser
+// offers one, otherwise the /download page (iPhone steps, APK, instructions). Hidden in the app.
+export function InstallAppButton({ className = '' }) {
+  const { canInstall, installed, install } = useInstallPrompt()
+  if (installed) return null
+  const cls = `w-full flex items-center justify-center gap-2 rounded-2xl border border-brand-200 bg-brand-50 py-3 text-[14px] font-semibold text-brand-700 active:scale-[.98] transition ${className}`
+  return canInstall ? (
+    <button type="button" onClick={install} className={cls}><Icon name="download" size={16} /> Install the Splash Host app</button>
+  ) : (
+    <a href="#/download" className={cls}><Icon name="download" size={16} /> Get the Splash Host app</a>
+  )
+}
+
 // Public, shareable page: <host-site>/#/download — works without logging in.
 export default function DownloadPage() {
   return (
