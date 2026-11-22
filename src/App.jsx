@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 
 import RequireAuth, { RequireApproved } from './state/RequireAuth.jsx'
 import RealtimeBridge from './state/RealtimeBridge.jsx'
+import DownloadPage from './ui/InstallApp.jsx'
 import { Splash, Login, Otp, ProfileSetup, GallerySetup, LiveAudition, KycIntro, DocumentUpload, PayoutAccount, UnderReview, Verified, Rejected } from './screens/onboarding.jsx'
 import Home from './screens/home.jsx'
 import { TopSpenders, TopPerformers } from './screens/leaderboard.jsx'
@@ -30,6 +31,8 @@ export default function App() {
       <Route path="/splash" element={<Splash />} />
       <Route path="/login" element={<Login />} />
       <Route path="/otp" element={<Otp />} />
+      {/* public: shareable "get the app" page (install as app / download APK) */}
+      <Route path="/download" element={<DownloadPage />} />
 
       <Route element={<RequireAuth><Outlet /></RequireAuth>}>
         <Route path="/onboarding/profile" element={<ProfileSetup />} />

@@ -10,6 +10,7 @@ import logoUrl from '../assets/logo.png'
 import { errorMessage } from '../lib/errors.js'
 import { uploadAvatar } from '../lib/avatar.js'
 import SupportFab from '../ui/SupportFab.jsx'
+import { InstallAppCard } from '../ui/InstallApp.jsx'
 import { Skel, SkelGroup, SkelHero, SkelRows, SkelToggles, SkelList, SkelResult } from '../ui/Skeleton.jsx'
 
 /* 39 / 40 — Settings + Profile */
@@ -98,6 +99,7 @@ export function Settings() {
         </div>
 
         <div className="px-5 lg:px-0 pb-24 lg:pb-6">
+          <InstallAppCard className="mt-4 lg:mt-0" />
           <SectionTitle className="mt-5 lg:mt-0 mb-1">Growth</SectionTitle>
           <div className="divide-y divide-black/5">
             <Row icon="trophy" tone="gold" title="Daily & Weekly Wins" sub="Top earners win bonus beans" onClick={() => nav('/rewards')} />

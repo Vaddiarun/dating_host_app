@@ -6,6 +6,11 @@ import { AuthProvider } from './state/AuthContext.jsx'
 import { NotificationsProvider } from './state/NotificationsContext.jsx'
 import { ChatUnreadProvider } from './state/ChatUnreadContext.jsx'
 import './index.css'
+import { registerServiceWorker } from './lib/pwa.js'
+
+// Installable app: listens for the browser's install prompt (lib/pwa.js) and registers the
+// service worker in production builds.
+registerServiceWorker()
 
 // After a new deploy, a tab left open from before it still holds an old
 // index.html that references old, now-deleted chunk hashes (Agora's SDK is
